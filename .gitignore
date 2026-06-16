@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+/data/
+.codex-review.txt
+node_modules/
+dist/
+.vite/
+frontend/test-results/
+/test-results/
+*.tsbuildinfo

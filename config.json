@@ -1,0 +1,46 @@
+{
+  "interval_seconds": 600,
+  "output_dir": "data",
+  "database": "data/sgodds_odds.sqlite3",
+  "request_timeout_seconds": 30,
+  "request_pause_seconds": 2,
+  "matches": [
+    {
+      "name": "Portugal vs Congo DR",
+      "url": "https://sgodds.com/football/current-odds/Portugal-vs-Congo-DR-139981",
+      "matchTime": "2026-06-18T01:00+08:00",
+      "league": "W Cup",
+      "matchNo": "5861"
+    },
+    {
+      "name": "England vs Croatia",
+      "url": "https://sgodds.com/football/current-odds/England-vs-Croatia-139983",
+      "matchTime": "2026-06-18T04:00+08:00",
+      "league": "W Cup",
+      "matchNo": "5839"
+    },
+    {
+      "name": "Ghana vs Panama",
+      "url": "https://sgodds.com/football/current-odds/Ghana-vs-Panama-139985",
+      "matchTime": "2026-06-18T07:00+08:00",
+      "league": "W Cup",
+      "matchNo": "5854"
+    },
+    {
+      "name": "Uzbekistan vs Colombia",
+      "url": "https://sgodds.com/football/current-odds/Uzbekistan-vs-Colombia-139993",
+      "matchTime": "2026-06-18T10:00+08:00",
+      "league": "W Cup",
+      "matchNo": "5866"
+    }
+  ],
+  "hidden_matches": [
+    {
+      "name": "Iran vs New Zealand",
+      "nameZh": "伊朗 对 新西兰",
+      "url": "https://sgodds.com/football/current-odds/Iran-vs-New-Zealand-139973",
+      "hiddenAt": "2026-06-16T14:42:33+08:00",
+      "reason": "user_hidden"
+    }
+  ]
+}

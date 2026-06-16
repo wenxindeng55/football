@@ -1,0 +1,125 @@
+import { Info } from 'lucide-react';
+import {
+  CartesianGrid,
+  Legend,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import type { MarketData } from '../types/odds';
+import { formatOdds } from '../utils/format';
+
+interface OddsTrendChartProps {
+  market: MarketData;
+}
+
+const lineColors = ['#22c987', '#f3c24b', '#f05252', '#38bdf8'];
+
+function themeColor(variableName: string, fallback: string) {
+  if (typeof window === 'undefined') return fallback;
+  const value = window.getComputedStyle(document.documentElement).getPropertyValue(variableName).trim();
+  return value ? `rgb(${value})` : fallback;
+}
+
+interface TooltipPayloadItem {
+  color?: string;
+  dataKey?: string | number;
+  name?: string | number;
+  value?: string | number;
+}
+
+interface CustomTooltipProps {
+  active?: boolean;
+  label?: string | number;
+  payload?: TooltipPayloadItem[];
+}
+
+function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
+  if (!active || !payload?.length) return null;
+
+  return (
+    <div className="rounded-lg border border-odds-border bg-odds-panel p-3 shadow-panel">
+      <p className="mb-2 text-xs text-odds-muted">{label}</p>
+      <div className="space-y-1">
+        {payload.map((item) => (
+          <div key={item.dataKey} className="flex items-center justify-between gap-6 text-sm">
+            <span style={{ color: item.color }}>{item.name ?? item.dataKey}</span>
+            <span className="numeric font-semibold text-odds-text">{formatOdds(Number(item.value))}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function OddsTrendChart({ market }: OddsTrendChartProps) {
+  const gridColor = themeColor('--odds-grid', '#263246');
+  const mutedColor = themeColor('--odds-muted', '#8f9bae');
+  const chartTimes = Array.from(
+    new Set(market.selections.flatMap((selection) => selection.points.map((point) => point.time))),
+  ).sort();
+  const selectionPointMaps = market.selections.map(
+    (selection) => new Map(selection.points.map((point) => [point.time, point.odds])),
+  );
+  const chartData = chartTimes.map((time) => {
+    const row: Record<string, string | number | null> = { time };
+    market.selections.forEach((_, selectionIndex) => {
+      row[`selection_${selectionIndex}`] = selectionPointMaps[selectionIndex].get(time) ?? null;
+    });
+    return row;
+  });
+
+  return (
+    <section className="surface min-w-0 p-4 sm:p-5">
+      <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+        <div>
+          <h3 className="text-lg font-semibold text-odds-text">赔率走势图</h3>
+          <p className="mt-1 text-sm text-odds-muted">{market.description}</p>
+        </div>
+        <div className="rounded-lg border border-odds-warning/30 bg-odds-warning/10 px-3 py-2 text-xs leading-5 text-odds-warning xl:max-w-[320px]">
+          <Info className="mr-1 inline h-3.5 w-3.5" />
+          赔率下降 = 市场更看好这个结果；赔率上升 = 市场更不看好这个结果。
+        </div>
+      </div>
+
+      <div className="h-[300px] min-w-0 sm:h-[340px]">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={chartData} margin={{ top: 12, right: 14, left: -10, bottom: 0 }}>
+            <CartesianGrid stroke={gridColor} strokeDasharray="4 4" vertical={false} />
+            <XAxis
+              dataKey="time"
+              tick={{ fill: mutedColor, fontSize: 12 }}
+              axisLine={{ stroke: gridColor }}
+              tickLine={false}
+            />
+            <YAxis
+              tick={{ fill: mutedColor, fontSize: 12 }}
+              axisLine={false}
+              tickLine={false}
+              tickFormatter={(value) => formatOdds(Number(value))}
+              width={48}
+              domain={['dataMin - 0.15', 'dataMax + 0.25']}
+            />
+            <Tooltip content={<CustomTooltip />} />
+            <Legend wrapperStyle={{ color: mutedColor, fontSize: 12 }} />
+            {market.selections.map((selection, index) => (
+              <Line
+                key={selection.option}
+                type="monotone"
+                dataKey={`selection_${index}`}
+                name={selection.option}
+                stroke={lineColors[index % lineColors.length]}
+                strokeWidth={2.4}
+                dot={{ r: 3, strokeWidth: 1.5 }}
+                activeDot={{ r: 6, strokeWidth: 2 }}
+              />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </section>
+  );
+}
