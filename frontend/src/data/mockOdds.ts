@@ -173,6 +173,7 @@ function createMatch(params: {
   homeTeam: string;
   awayTeam: string;
   matchTime: string;
+  scheduledAt?: string | null;
   score: string;
   status: MatchData['status'];
   direction: string;
@@ -185,6 +186,7 @@ function createMatch(params: {
     name: `${params.homeTeam} vs ${params.awayTeam}`,
     homeTeam: params.homeTeam,
     awayTeam: params.awayTeam,
+    scheduledAt: params.scheduledAt ?? null,
     matchTime: params.matchTime,
     score: params.score,
     status: params.status,
@@ -204,6 +206,7 @@ export const matches: MatchData[] = [
     id: 'belgium-egypt',
     homeTeam: 'Belgium',
     awayTeam: 'Egypt',
+    scheduledAt: '2026-06-20 22:00',
     matchTime: '06月20日 22:00',
     score: '未开赛',
     status: '未开赛',
@@ -218,6 +221,7 @@ export const matches: MatchData[] = [
     id: 'spain-cape-verde',
     homeTeam: 'Spain',
     awayTeam: 'Cape Verde',
+    scheduledAt: '2026-06-21 01:00',
     matchTime: '06月21日 01:00',
     score: '未开赛',
     status: '未开赛',
@@ -232,6 +236,7 @@ export const matches: MatchData[] = [
     id: 'germany-ivory-coast',
     homeTeam: 'Germany',
     awayTeam: 'Ivory Coast',
+    scheduledAt: '2026-06-21 03:30',
     matchTime: '06月21日 03:30',
     score: '0 - 0',
     status: '进行中',

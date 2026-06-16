@@ -868,6 +868,7 @@ def build_match_data(meta: dict[str, Any]) -> dict[str, Any]:
                 "awayTeam": away,
                 "homeTeamEnglish": meta.get("homeTeamEnglish"),
                 "awayTeamEnglish": meta.get("awayTeamEnglish"),
+                "scheduledAt": format_datetime(str(match_time)) if match_time else None,
                 "matchTime": (
                     f"比赛时间 {format_datetime(str(match_time))}"
                     if match_time

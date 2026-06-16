@@ -16,7 +16,7 @@ import { AddMatchModal } from './components/AddMatchModal';
 import { AlertPanel } from './components/AlertPanel';
 import { Header } from './components/Header';
 import { MarketTabs } from './components/MarketTabs';
-import { MatchCard } from './components/MatchCard';
+import { MatchDateGroup } from './components/MatchDateGroup';
 import { MatchOverview } from './components/MatchOverview';
 import { OddsSummaryCard } from './components/OddsSummaryCard';
 import { OddsTable } from './components/OddsTable';
@@ -27,6 +27,7 @@ import { Toast, type ToastMessage } from './components/Toast';
 import { getMarketRows, matches as mockMatches } from './data/mockOdds';
 import type { MarketData, MarketKey, MatchData, OddsTableRow } from './types/odds';
 import { localizeMatch, localizeMarket, localizeOddsRows } from './utils/display';
+import { groupMatchesBySchedule } from './utils/matchSchedule';
 
 type ActionKey = 'csv' | 'chart' | 'raw' | 'add';
 
@@ -129,6 +130,7 @@ function App() {
     () => matches.find((match) => match.id === selectedMatchId) ?? matches[0] ?? localizedMockMatches[0],
     [matches, selectedMatchId],
   );
+  const matchGroups = useMemo(() => groupMatchesBySchedule(matches), [matches]);
 
   useEffect(() => {
     let cancelled = false;
@@ -314,15 +316,15 @@ function App() {
           onOpenSettings={() => setThemePanelOpen(true)}
         />
 
-        <section className="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {matches.map((match) => (
-            <MatchCard
-              key={match.id}
-              match={match}
-              selected={match.id === selectedMatch.id}
+        <section className="flex min-w-0 flex-col gap-5">
+          {matchGroups.map((group) => (
+            <MatchDateGroup
+              key={group.key}
+              group={group}
+              selectedMatchId={selectedMatch.id}
               onSelect={(id) => void handleSelectMatch(id)}
               onHide={(id) => void handleHideMonitorMatch(id)}
-              hiding={hidingMatchId === match.id}
+              hidingMatchId={hidingMatchId}
             />
           ))}
         </section>

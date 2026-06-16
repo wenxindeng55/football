@@ -60,6 +60,7 @@ export interface MatchData {
   awayTeam: string;
   homeTeamEnglish?: string;
   awayTeamEnglish?: string;
+  scheduledAt?: string | null;
   matchTime: string;
   score: string;
   status: MatchStatus;

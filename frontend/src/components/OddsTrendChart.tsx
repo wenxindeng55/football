@@ -17,6 +17,8 @@ interface OddsTrendChartProps {
 }
 
 const lineColors = ['#22c987', '#f3c24b', '#f05252', '#38bdf8'];
+const dateTimePattern = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/;
+const clockTimePattern = /^(\d{1,2}):(\d{2})$/;
 
 function themeColor(variableName: string, fallback: string) {
   if (typeof window === 'undefined') return fallback;
@@ -28,6 +30,9 @@ interface TooltipPayloadItem {
   color?: string;
   dataKey?: string | number;
   name?: string | number;
+  payload?: {
+    time?: string;
+  };
   value?: string | number;
 }
 
@@ -37,14 +42,57 @@ interface CustomTooltipProps {
   payload?: TooltipPayloadItem[];
 }
 
+function parseChartTimestamp(value: string, fallbackIndex: number) {
+  const trimmed = value.trim();
+  if (/(?:z|[+-]\d{2}:?\d{2})$/i.test(trimmed)) {
+    const parsed = Date.parse(trimmed);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+
+  const dateTimeMatch = trimmed.match(dateTimePattern);
+  if (dateTimeMatch) {
+    const year = Number(dateTimeMatch[1]);
+    const month = Number(dateTimeMatch[2]);
+    const day = Number(dateTimeMatch[3]);
+    const hour = Number(dateTimeMatch[4] ?? 0);
+    const minute = Number(dateTimeMatch[5] ?? 0);
+    const second = Number(dateTimeMatch[6] ?? 0);
+    return Date.UTC(year, month - 1, day, hour, minute, second);
+  }
+
+  const clockTimeMatch = trimmed.match(clockTimePattern);
+  if (clockTimeMatch) {
+    const hour = Number(clockTimeMatch[1]);
+    const minute = Number(clockTimeMatch[2]);
+    return Date.UTC(1970, 0, 1, hour, minute);
+  }
+
+  return fallbackIndex;
+}
+
+function formatAxisTime(value: number) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+
+  const hour = String(date.getUTCHours()).padStart(2, '0');
+  const minute = String(date.getUTCMinutes()).padStart(2, '0');
+  if (date.getUTCFullYear() === 1970) return `${hour}:${minute}`;
+
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${month}-${day} ${hour}:${minute}`;
+}
+
 function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
-  if (!active || !payload?.length) return null;
+  const visiblePayload = payload?.filter((item) => item.value !== null && Number.isFinite(Number(item.value))) ?? [];
+  if (!active || visiblePayload.length === 0) return null;
+  const timeLabel = visiblePayload[0]?.payload?.time ?? (typeof label === 'number' ? formatAxisTime(label) : label);
 
   return (
     <div className="rounded-lg border border-odds-border bg-odds-panel p-3 shadow-panel">
-      <p className="mb-2 text-xs text-odds-muted">{label}</p>
+      <p className="mb-2 text-xs text-odds-muted">{timeLabel}</p>
       <div className="space-y-1">
-        {payload.map((item) => (
+        {visiblePayload.map((item) => (
           <div key={item.dataKey} className="flex items-center justify-between gap-6 text-sm">
             <span style={{ color: item.color }}>{item.name ?? item.dataKey}</span>
             <span className="numeric font-semibold text-odds-text">{formatOdds(Number(item.value))}</span>
@@ -60,12 +108,17 @@ export function OddsTrendChart({ market }: OddsTrendChartProps) {
   const mutedColor = themeColor('--odds-muted', '#8f9bae');
   const chartTimes = Array.from(
     new Set(market.selections.flatMap((selection) => selection.points.map((point) => point.time))),
-  ).sort();
+  )
+    .map((time, index) => ({
+      time,
+      timestampMs: parseChartTimestamp(time, index),
+    }))
+    .sort((left, right) => left.timestampMs - right.timestampMs || left.time.localeCompare(right.time));
   const selectionPointMaps = market.selections.map(
     (selection) => new Map(selection.points.map((point) => [point.time, point.odds])),
   );
-  const chartData = chartTimes.map((time) => {
-    const row: Record<string, string | number | null> = { time };
+  const chartData = chartTimes.map(({ time, timestampMs }) => {
+    const row: Record<string, string | number | null> = { time, timestampMs };
     market.selections.forEach((_, selectionIndex) => {
       row[`selection_${selectionIndex}`] = selectionPointMaps[selectionIndex].get(time) ?? null;
     });
@@ -90,10 +143,15 @@ export function OddsTrendChart({ market }: OddsTrendChartProps) {
           <LineChart data={chartData} margin={{ top: 12, right: 14, left: -10, bottom: 0 }}>
             <CartesianGrid stroke={gridColor} strokeDasharray="4 4" vertical={false} />
             <XAxis
-              dataKey="time"
+              dataKey="timestampMs"
+              type="number"
+              scale="time"
+              domain={['dataMin', 'dataMax']}
               tick={{ fill: mutedColor, fontSize: 12 }}
               axisLine={{ stroke: gridColor }}
               tickLine={false}
+              tickFormatter={(value) => formatAxisTime(Number(value))}
+              minTickGap={28}
             />
             <YAxis
               tick={{ fill: mutedColor, fontSize: 12 }}
@@ -108,7 +166,7 @@ export function OddsTrendChart({ market }: OddsTrendChartProps) {
             {market.selections.map((selection, index) => (
               <Line
                 key={selection.option}
-                type="monotone"
+                type="linear"
                 dataKey={`selection_${index}`}
                 name={selection.option}
                 stroke={lineColors[index % lineColors.length]}
