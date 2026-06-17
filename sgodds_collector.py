@@ -19,6 +19,8 @@ from team_translations import parse_match_teams, translate_match_name, translate
 
 REQUEST_INTERVAL_SECONDS = 600
 CURRENT_ODDS_URL = "https://sgodds.com/football/current-odds"
+AUTO_DISCOVERY_DAY_OFFSETS = (0, 1)
+MATCH_FINISHED_AFTER = timedelta(hours=2)
 DEFAULT_CONFIG_PATH = Path("config.json")
 DEFAULT_OUTPUT_DIR = Path("data")
 DEFAULT_DB_NAME = "sgodds_odds.sqlite3"
@@ -203,6 +205,64 @@ def sg_today() -> date:
     return datetime.now(SG_TIMEZONE).date()
 
 
+def normalize_sg_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=SG_TIMEZONE)
+    return value.astimezone(SG_TIMEZONE)
+
+
+def parse_match_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    cleaned = clean_text(value)
+    if cleaned.endswith("Z"):
+        cleaned = f"{cleaned[:-1]}+00:00"
+    try:
+        return normalize_sg_datetime(datetime.fromisoformat(cleaned))
+    except ValueError:
+        pass
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            return normalize_sg_datetime(datetime.strptime(cleaned, fmt))
+        except ValueError:
+            continue
+    return None
+
+
+def is_finished_match_time(match_time: str | None, now: datetime | None = None) -> bool:
+    scheduled_at = parse_match_datetime(match_time)
+    if scheduled_at is None:
+        return False
+    current_time = normalize_sg_datetime(now or datetime.now(SG_TIMEZONE))
+    return current_time >= scheduled_at + MATCH_FINISHED_AFTER
+
+
+def match_status_for_time(match_time: str | None, now: datetime | None = None) -> str:
+    scheduled_at = parse_match_datetime(match_time)
+    if scheduled_at is None:
+        return "未开赛"
+    current_time = normalize_sg_datetime(now or datetime.now(SG_TIMEZONE))
+    if current_time >= scheduled_at + MATCH_FINISHED_AFTER:
+        return "已完赛"
+    if current_time >= scheduled_at:
+        return "进行中"
+    return "未开赛"
+
+
+def collectable_matches(matches: Iterable[MatchConfig], now: datetime | None = None) -> list[MatchConfig]:
+    current_time = normalize_sg_datetime(now or datetime.now(SG_TIMEZONE))
+    return [
+        match
+        for match in matches
+        if not is_finished_match_time(match.match_time, current_time)
+    ]
+
+
+def auto_discovery_target_dates(today: date | None = None) -> list[date]:
+    base_date = today or sg_today()
+    return [base_date + timedelta(days=offset) for offset in AUTO_DISCOVERY_DAY_OFFSETS]
+
+
 def parse_sgodds_date(value: str) -> date | None:
     match = re.search(r"(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})", value)
     if not match:
@@ -257,20 +317,43 @@ def match_from_state(raw_match: dict[str, Any]) -> MatchConfig | None:
     )
 
 
-def load_auto_matches(output_dir: Path, target_date: date) -> list[MatchConfig]:
-    path = auto_matches_path(output_dir)
-    if not path.exists():
-        return []
-    try:
-        with path.open("r", encoding="utf-8") as file:
-            payload = json.load(file)
-    except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("自动比赛状态读取失败 path=%s error=%s", path, exc)
-        return []
+def match_config_date(match: MatchConfig) -> date | None:
+    parsed = parse_match_datetime(match.match_time)
+    return parsed.date() if parsed else None
 
-    if payload.get("latest_target_date") != target_date.isoformat():
-        return []
-    raw_matches = payload.get("latest_matches", [])
+
+def filter_matches_by_target_dates(
+    matches: Iterable[MatchConfig],
+    target_dates: Iterable[date],
+) -> list[MatchConfig]:
+    target_date_list = list(target_dates)
+    target_date_values = {target_date.isoformat() for target_date in target_date_list}
+    filtered: list[MatchConfig] = []
+    for match in matches:
+        match_date = match_config_date(match)
+        if match_date is None or match_date.isoformat() in target_date_values:
+            filtered.append(match)
+    return filtered
+
+
+def state_target_dates(payload: dict[str, Any], dates_key: str, date_key: str) -> set[str]:
+    target_dates = payload.get(dates_key)
+    if isinstance(target_dates, list):
+        return {str(target_date) for target_date in target_dates if str(target_date).strip()}
+
+    target_date = str(payload.get(date_key, "")).strip()
+    return {target_date} if target_date else set()
+
+
+def payload_target_dates(payload: dict[str, Any]) -> set[str]:
+    return state_target_dates(payload, "latest_target_dates", "latest_target_date")
+
+
+def history_entry_target_dates(entry: dict[str, Any]) -> set[str]:
+    return state_target_dates(entry, "target_dates", "target_date")
+
+
+def state_matches(raw_matches: Any) -> list[MatchConfig]:
     if not isinstance(raw_matches, list):
         return []
     return [
@@ -280,10 +363,40 @@ def load_auto_matches(output_dir: Path, target_date: date) -> list[MatchConfig]:
     ]
 
 
-def write_auto_matches(output_dir: Path, target_date: date, matches: list[MatchConfig]) -> None:
+def load_auto_matches(output_dir: Path, target_dates: Iterable[date]) -> list[MatchConfig]:
+    path = auto_matches_path(output_dir)
+    if not path.exists():
+        return []
+    target_date_list = list(target_dates)
+    target_date_values = {target_date.isoformat() for target_date in target_date_list}
+    try:
+        with path.open("r", encoding="utf-8") as file:
+            payload = json.load(file)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("自动比赛状态读取失败 path=%s error=%s", path, exc)
+        return []
+
+    matched: dict[str, MatchConfig] = {}
+    history = payload.get("history", [])
+    if isinstance(history, list):
+        for entry in history:
+            if not isinstance(entry, dict) or not (history_entry_target_dates(entry) & target_date_values):
+                continue
+            for match in filter_matches_by_target_dates(state_matches(entry.get("matches", [])), target_date_list):
+                matched[match.url] = match
+
+    if payload_target_dates(payload) & target_date_values:
+        for match in filter_matches_by_target_dates(state_matches(payload.get("latest_matches", [])), target_date_list):
+            matched[match.url] = match
+
+    return list(matched.values())
+
+
+def write_auto_matches(output_dir: Path, target_dates: Iterable[date], matches: list[MatchConfig]) -> None:
     path = auto_matches_path(output_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     discovered_at = datetime.now(SG_TIMEZONE).isoformat(timespec="seconds")
+    target_date_values = [target_date.isoformat() for target_date in list(target_dates)]
     latest_matches = [match_to_state(match) for match in matches]
     history: list[dict[str, Any]] = []
     if path.exists():
@@ -298,7 +411,8 @@ def write_auto_matches(output_dir: Path, target_date: date, matches: list[MatchC
 
     history.append(
         {
-            "target_date": target_date.isoformat(),
+            "target_date": target_date_values[-1] if target_date_values else None,
+            "target_dates": target_date_values,
             "discovered_at": discovered_at,
             "matches": latest_matches,
         }
@@ -306,7 +420,8 @@ def write_auto_matches(output_dir: Path, target_date: date, matches: list[MatchC
     with path.open("w", encoding="utf-8") as file:
         json.dump(
             {
-                "latest_target_date": target_date.isoformat(),
+                "latest_target_date": target_date_values[-1] if target_date_values else None,
+                "latest_target_dates": target_date_values,
                 "latest_updated_at": discovered_at,
                 "latest_matches": latest_matches,
                 "history": history,
@@ -373,19 +488,22 @@ def parse_current_odds_matches(html: str, target_date: date) -> list[MatchConfig
 
 
 def discover_auto_matches(session: requests.Session, config: AppConfig) -> list[MatchConfig]:
-    target_date = sg_today() + timedelta(days=1)
+    target_dates = auto_discovery_target_dates()
+    target_dates_text = ",".join(target_date.isoformat() for target_date in target_dates)
     try:
         response = session.get(CURRENT_ODDS_URL, timeout=config.request_timeout_seconds)
         response.raise_for_status()
-        matches = [
-            match
-            for match in parse_current_odds_matches(response.text, target_date)
-            if match.url not in config.hidden_urls
-        ]
-        write_auto_matches(config.output_dir, target_date, matches)
+        discovered_matches: dict[str, MatchConfig] = {}
+        current_time = datetime.now(SG_TIMEZONE)
+        for target_date in target_dates:
+            for match in parse_current_odds_matches(response.text, target_date):
+                if match.url not in config.hidden_urls and not is_finished_match_time(match.match_time, current_time):
+                    discovered_matches[match.url] = match
+        matches = list(discovered_matches.values())
+        write_auto_matches(config.output_dir, target_dates, matches)
         logger.info(
-            "自动发现明日比赛完成 target_date=%s count=%s state=%s",
-            target_date.isoformat(),
+            "自动发现今日和明日比赛完成 target_dates=%s count=%s state=%s",
+            target_dates_text,
             len(matches),
             auto_matches_path(config.output_dir),
         )
@@ -393,12 +511,12 @@ def discover_auto_matches(session: requests.Session, config: AppConfig) -> list[
     except Exception as exc:
         fallback_matches = [
             match
-            for match in load_auto_matches(config.output_dir, target_date)
-            if match.url not in config.hidden_urls
+            for match in load_auto_matches(config.output_dir, target_dates)
+            if match.url not in config.hidden_urls and not is_finished_match_time(match.match_time)
         ]
         logger.exception(
-            "自动发现明日比赛失败，使用状态文件兜底 target_date=%s fallback_count=%s error=%s",
-            target_date.isoformat(),
+            "自动发现今日和明日比赛失败，使用状态文件兜底 target_dates=%s fallback_count=%s error=%s",
+            target_dates_text,
             len(fallback_matches),
             exc,
         )
@@ -718,12 +836,15 @@ def collect_once(config: AppConfig) -> int:
     session = requests.Session()
     session.headers.update({"User-Agent": config.user_agent})
     auto_matches = discover_auto_matches(session, config)
-    targets = merge_match_targets(config.matches, auto_matches)
+    raw_targets = merge_match_targets(config.matches, auto_matches)
+    targets = collectable_matches(raw_targets)
+    skipped_finished_count = len(raw_targets) - len(targets)
     logger.info(
-        "单轮采集开始 targets=%s manual=%s auto=%s database=%s output_dir=%s",
+        "单轮采集开始 targets=%s manual=%s auto=%s skipped_finished=%s database=%s output_dir=%s",
         len(targets),
         len(config.matches),
         len(auto_matches),
+        skipped_finished_count,
         config.database_path,
         config.output_dir,
     )

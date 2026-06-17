@@ -22,6 +22,7 @@ from sgodds_collector import (
     CURRENT_ODDS_URL,
     MatchConfig,
     SG_TIMEZONE,
+    match_status_for_time,
     parse_current_odds_matches,
 )
 from team_translations import translate_match_name, translate_team
@@ -62,6 +63,10 @@ app.add_middleware(
     allow_origins=[
         "http://127.0.0.1:5173",
         "http://localhost:5173",
+        "http://127.0.0.1:5174",
+        "http://localhost:5174",
+        "http://127.0.0.1:5175",
+        "http://localhost:5175",
         "http://127.0.0.1:4173",
         "http://localhost:4173",
     ],
@@ -860,6 +865,7 @@ def build_match_data(meta: dict[str, Any]) -> dict[str, Any]:
             alerts = build_alerts(connection, meta)
             updated_at = meta["collectedAt"] or meta["pageUpdatedAt"]
             match_time = meta.get("matchTime")
+            match_status = match_status_for_time(str(match_time) if match_time else None)
             return {
                 "id": meta["id"],
                 "name": meta["name"],
@@ -874,8 +880,8 @@ def build_match_data(meta: dict[str, Any]) -> dict[str, Any]:
                     if match_time
                     else f"数据更新 {format_datetime(updated_at)}"
                 ),
-                "score": "未开赛",
-                "status": "未开赛",
+                "score": match_status,
+                "status": match_status,
                 "direction": build_direction(connection, meta),
                 "tags": build_tags(alerts, summary_cards),
                 "dataSource": "sgodds SQLite",

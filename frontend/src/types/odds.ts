@@ -2,7 +2,7 @@ export type MarketKey = '1x2' | 'asian' | 'totals' | 'btts';
 
 export type AlertLevel = '普通' | '重要' | '高风险';
 
-export type MatchStatus = '未开赛' | '进行中' | '已结束';
+export type MatchStatus = '未开赛' | '进行中' | '已完赛';
 
 export interface Tag {
   label: string;

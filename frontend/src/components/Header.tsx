@@ -4,11 +4,12 @@ interface HeaderProps {
   updatedAt: string;
   timezone: string;
   exporting: boolean;
+  exportDisabled?: boolean;
   onExportCsv: () => void;
   onOpenSettings: () => void;
 }
 
-export function Header({ updatedAt, timezone, exporting, onExportCsv, onOpenSettings }: HeaderProps) {
+export function Header({ updatedAt, timezone, exporting, exportDisabled = false, onExportCsv, onOpenSettings }: HeaderProps) {
   return (
     <header className="surface flex flex-col gap-4 px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
       <div className="flex items-center gap-3">
@@ -35,7 +36,7 @@ export function Header({ updatedAt, timezone, exporting, onExportCsv, onOpenSett
           <button
             type="button"
             onClick={onExportCsv}
-            disabled={exporting}
+            disabled={exporting || exportDisabled}
             className="focus-ring inline-flex items-center gap-2 rounded-md border border-odds-border bg-odds-panel2 px-3 py-2 text-sm text-odds-text hover:border-odds-accent/50 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <Download className="h-4 w-4" />

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import {
   addMonitorMatch,
   downloadChart,
@@ -55,8 +56,9 @@ function saveBlob(blob: Blob, filename: string) {
 }
 
 function App() {
-  const [matches, setMatches] = useState<MatchData[]>(localizedMockMatches);
-  const [selectedMatchId, setSelectedMatchId] = useState(localizedMockMatches[0].id);
+  const [matches, setMatches] = useState<MatchData[]>([]);
+  const [selectedMatchId, setSelectedMatchId] = useState('');
+  const [initialMatchesLoading, setInitialMatchesLoading] = useState(true);
   const [apiMatchIds, setApiMatchIds] = useState<string[]>([]);
   const [activeMarket, setActiveMarket] = useState<MarketKey>('1x2');
   const [liveMarket, setLiveMarket] = useState<MarketData | null>(null);
@@ -72,6 +74,9 @@ function App() {
   const [themePanelOpen, setThemePanelOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeMode>(() => (localStorage.getItem('odds-theme') as ThemeMode | null) ?? 'dark');
   const [customBackground, setCustomBackground] = useState(() => localStorage.getItem('odds-custom-bg') ?? '#0b1220');
+  const [showFinishedMatches, setShowFinishedMatches] = useState(
+    () => localStorage.getItem('odds-show-finished') === 'true',
+  );
   const [toast, setToast] = useState<ToastMessage | null>(null);
 
   const showToast = useCallback((tone: ToastMessage['tone'], text: string) => {
@@ -102,6 +107,13 @@ function App() {
     } catch (error) {
       setApiMatchIds([]);
       console.warn('后端 API 请求失败，继续使用本地 mock data。', error);
+      setMatches((currentMatches) => {
+        if (currentMatches.length > 0) return currentMatches;
+        setSelectedMatchId(localizedMockMatches[0].id);
+        return localizedMockMatches;
+      });
+    } finally {
+      setInitialMatchesLoading(false);
     }
   }, []);
 
@@ -121,16 +133,43 @@ function App() {
   }, [customBackground, theme]);
 
   useEffect(() => {
+    localStorage.setItem('odds-show-finished', String(showFinishedMatches));
+  }, [showFinishedMatches]);
+
+  useEffect(() => {
     if (!toast) return undefined;
     const timer = window.setTimeout(() => setToast(null), 3600);
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  const selectedMatch = useMemo(
-    () => matches.find((match) => match.id === selectedMatchId) ?? matches[0] ?? localizedMockMatches[0],
-    [matches, selectedMatchId],
+  const finishedMatches = useMemo(() => matches.filter((match) => match.status === '已完赛'), [matches]);
+  const visibleMatches = useMemo(
+    () => (showFinishedMatches ? matches : matches.filter((match) => match.status !== '已完赛')),
+    [matches, showFinishedMatches],
   );
-  const matchGroups = useMemo(() => groupMatchesBySchedule(matches), [matches]);
+  const visibleMatchIds = useMemo(() => new Set(visibleMatches.map((match) => match.id)), [visibleMatches]);
+  const hasVisibleMatches = visibleMatches.length > 0;
+
+  useEffect(() => {
+    if (!hasVisibleMatches || visibleMatchIds.has(selectedMatchId)) return;
+    setSelectedMatchId(visibleMatches[0].id);
+    setActiveMarket('1x2');
+    setLiveMarket(null);
+    setLiveRows(null);
+  }, [hasVisibleMatches, selectedMatchId, visibleMatchIds, visibleMatches]);
+
+  const selectedMatch = useMemo(
+    () =>
+      visibleMatches.find((match) => match.id === selectedMatchId) ??
+      visibleMatches[0] ??
+      matches.find((match) => match.id === selectedMatchId) ??
+      matches[0] ??
+      localizedMockMatches[0],
+    [matches, selectedMatchId, visibleMatches],
+  );
+  const matchGroups = useMemo(() => groupMatchesBySchedule(visibleMatches), [visibleMatches]);
+  const headerUpdatedAt =
+    initialMatchesLoading && matches.length === 0 ? '加载中' : hasVisibleMatches ? selectedMatch.updatedAt : '暂无数据';
 
   useEffect(() => {
     let cancelled = false;
@@ -309,61 +348,99 @@ function App() {
     <main className="min-h-screen min-w-0 px-3 py-4 text-odds-text sm:px-5 lg:px-6 lg:py-6">
       <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-5">
         <Header
-          updatedAt={selectedMatch.updatedAt}
+          updatedAt={headerUpdatedAt}
           timezone="Asia/Singapore"
           exporting={loadingAction === 'csv'}
+          exportDisabled={!hasVisibleMatches}
           onExportCsv={handleExportCsv}
           onOpenSettings={() => setThemePanelOpen(true)}
         />
 
         <section className="flex min-w-0 flex-col gap-5">
-          {matchGroups.map((group) => (
-            <MatchDateGroup
-              key={group.key}
-              group={group}
-              selectedMatchId={selectedMatch.id}
-              onSelect={(id) => void handleSelectMatch(id)}
-              onHide={(id) => void handleHideMonitorMatch(id)}
-              hidingMatchId={hidingMatchId}
-            />
-          ))}
-        </section>
-
-        <MatchOverview match={selectedMatch} />
-
-        <section className="grid min-w-0 gap-4 lg:grid-cols-3">
-          {selectedMatch.summaryCards.map((summary) => (
-            <OddsSummaryCard key={summary.title} summary={summary} />
-          ))}
-        </section>
-
-        <section className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="flex min-w-0 flex-col gap-5">
-            <section className="surface p-4 sm:p-5">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <h3 className="text-lg font-semibold text-odds-text">盘口类型</h3>
-                  <p className="mt-1 text-sm text-odds-muted">
-                    点击 Tab 后，图表和表格同步切换。{marketLoading ? '正在同步后台数据...' : ''}
-                  </p>
-                </div>
-                <MarketTabs activeMarket={activeMarket} onChange={setActiveMarket} />
+          {finishedMatches.length > 0 ? (
+            <div className="surface flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex min-w-0 items-center gap-2 text-sm text-odds-text2">
+                {showFinishedMatches ? (
+                  <Eye className="h-4 w-4 shrink-0 text-odds-accent" />
+                ) : (
+                  <EyeOff className="h-4 w-4 shrink-0 text-odds-muted" />
+                )}
+                <span className="truncate">
+                  {showFinishedMatches
+                    ? `已显示 ${finishedMatches.length} 场已完赛`
+                    : `已隐藏 ${finishedMatches.length} 场已完赛`}
+                </span>
               </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={showFinishedMatches}
+                onClick={() => setShowFinishedMatches((current) => !current)}
+                className="focus-ring inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-odds-border bg-odds-control px-3 py-2 text-sm text-odds-text2 transition hover:border-odds-accent/50 hover:text-odds-text"
+              >
+                {showFinishedMatches ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                {showFinishedMatches ? '隐藏已完赛' : '显示已完赛'}
+              </button>
+            </div>
+          ) : null}
+
+          {initialMatchesLoading && matches.length === 0 ? (
+            <section className="surface p-5 text-sm text-odds-text2">正在加载比赛数据...</section>
+          ) : hasVisibleMatches ? (
+            matchGroups.map((group) => (
+              <MatchDateGroup
+                key={group.key}
+                group={group}
+                selectedMatchId={selectedMatch.id}
+                onSelect={(id) => void handleSelectMatch(id)}
+                onHide={(id) => void handleHideMonitorMatch(id)}
+                hidingMatchId={hidingMatchId}
+              />
+            ))
+          ) : (
+            <section className="surface p-5 text-sm text-odds-text2">当前没有未完赛比赛。</section>
+          )}
+        </section>
+
+        {hasVisibleMatches ? (
+          <>
+            <MatchOverview match={selectedMatch} />
+
+            <section className="grid min-w-0 gap-4 lg:grid-cols-3">
+              {selectedMatch.summaryCards.map((summary) => (
+                <OddsSummaryCard key={summary.title} summary={summary} />
+              ))}
             </section>
 
-            <OddsTrendChart market={market} />
-            <OddsTable rows={tableRows} />
-            <ActionBar
-              loadingAction={loadingAction}
-              onExportCsv={handleExportCsv}
-              onExportChart={handleExportChart}
-              onViewRawData={handleViewRawData}
-              onAddMatch={() => setAddModalOpen(true)}
-            />
-          </div>
+            <section className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+              <div className="flex min-w-0 flex-col gap-5">
+                <section className="surface p-4 sm:p-5">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <h3 className="text-lg font-semibold text-odds-text">盘口类型</h3>
+                      <p className="mt-1 text-sm text-odds-muted">
+                        点击 Tab 后，图表和表格同步切换。{marketLoading ? '正在同步后台数据...' : ''}
+                      </p>
+                    </div>
+                    <MarketTabs activeMarket={activeMarket} onChange={setActiveMarket} />
+                  </div>
+                </section>
 
-          <AlertPanel alerts={selectedMatch.alerts} />
-        </section>
+                <OddsTrendChart market={market} />
+                <OddsTable rows={tableRows} />
+                <ActionBar
+                  loadingAction={loadingAction}
+                  onExportCsv={handleExportCsv}
+                  onExportChart={handleExportChart}
+                  onViewRawData={handleViewRawData}
+                  onAddMatch={() => setAddModalOpen(true)}
+                />
+              </div>
+
+              <AlertPanel alerts={selectedMatch.alerts} />
+            </section>
+          </>
+        ) : null}
       </div>
 
       <ThemePanel
