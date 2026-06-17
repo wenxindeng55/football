@@ -43,6 +43,14 @@ export function AlertPanel({ alerts }: AlertPanelProps) {
                 <span className="numeric text-xs text-odds-text3">{alert.time}</span>
               </div>
               <p className="mt-3 text-sm leading-6 text-odds-text">{alert.message}</p>
+              {(alert.marketWeight || alert.confidence || alert.confirmationNeeded) ? (
+                <div className="mt-3 grid gap-2 text-xs text-odds-text3">
+                  {alert.marketWeight ? <span>市场权重：{alert.marketWeight}</span> : null}
+                  {alert.confidence ? <span>置信度：{alert.confidence}</span> : null}
+                  {alert.triggerReason ? <span>触发原因：{alert.triggerReason}</span> : null}
+                  {alert.confirmationNeeded ? <span>需要确认：{alert.confirmationNeeded}</span> : null}
+                </div>
+              ) : null}
             </article>
           );
         })}

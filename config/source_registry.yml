@@ -1,0 +1,43 @@
+sources:
+  thesportsdb:
+    label: TheSportsDB
+    enabled: true
+    tier: free
+    base_url: https://www.thesportsdb.com/api/v1/json
+    api_key_env: THESPORTSDB_API_KEY
+    default_api_key: "123"
+    timeout_seconds: 20
+    supports:
+      lineups: true
+      events: true
+      stats: true
+      injuries: false
+      standings: false
+    endpoints:
+      event: lookupevent.php?id={external_match_id}
+      lineups: lookuplineup.php?id={external_match_id}
+      events: lookuptimeline.php?id={external_match_id}
+      stats: lookupeventstats.php?id={external_match_id}
+
+  api_football:
+    label: API-Football
+    enabled: false
+    tier: free_quota
+    api_key_env: API_FOOTBALL_KEY
+    supports:
+      lineups: true
+      events: true
+      stats: true
+      injuries: true
+      standings: true
+
+  sofascore:
+    label: Sofascore
+    enabled: false
+    tier: unofficial
+    supports:
+      lineups: true
+      events: true
+      stats: true
+      injuries: false
+      standings: true

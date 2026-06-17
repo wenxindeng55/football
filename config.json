@@ -32,6 +32,34 @@
       "matchTime": "2026-06-18T10:00+08:00",
       "league": "W Cup",
       "matchNo": "5866"
+    },
+    {
+      "name": "Czech Republic vs South Africa",
+      "url": "https://sgodds.com/football/current-odds/Czech-Republic-vs-South-Africa-140058",
+      "matchTime": "2026-06-19T00:00+08:00",
+      "league": "W Cup",
+      "matchNo": "5827"
+    },
+    {
+      "name": "Switzerland vs Bosnia",
+      "url": "https://sgodds.com/football/current-odds/Switzerland-vs-Bosnia-140064",
+      "matchTime": "2026-06-19T03:00+08:00",
+      "league": "W Cup",
+      "matchNo": "5879"
+    },
+    {
+      "name": "Canada vs Qatar",
+      "url": "https://sgodds.com/football/current-odds/Canada-vs-Qatar-140066",
+      "matchTime": "2026-06-19T06:00+08:00",
+      "league": "W Cup",
+      "matchNo": "5865"
+    },
+    {
+      "name": "Mexico vs Korea Republic",
+      "url": "https://sgodds.com/football/current-odds/Mexico-vs-Korea-Republic-140060",
+      "matchTime": "2026-06-19T09:00+08:00",
+      "league": "W Cup",
+      "matchNo": "5877"
     }
   ],
   "hidden_matches": [
@@ -42,5 +70,7 @@
       "hiddenAt": "2026-06-16T14:42:33+08:00",
       "reason": "user_hidden"
     }
-  ]
+  ],
+  "dashboard_hidden_matches": [],
+  "paused_matches": []
 }

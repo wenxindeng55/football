@@ -11,7 +11,7 @@ export function OddsSummaryCard({ summary }: OddsSummaryCardProps) {
   const Icon = isDown ? TrendingDown : TrendingUp;
 
   return (
-    <article className="surface min-w-0 p-4">
+    <article className="surface h-fit min-w-0 self-start bg-odds-panel2/70 p-4">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm font-semibold text-odds-text">{summary.title}</p>
         <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs numeric ${isDown ? 'border-odds-success/30 bg-odds-success/10 text-odds-success' : 'border-odds-danger/30 bg-odds-danger/10 text-odds-danger'}`}>
@@ -20,14 +20,18 @@ export function OddsSummaryCard({ summary }: OddsSummaryCardProps) {
         </span>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-3">
-        <div className="surface-subtle p-3">
+      <div className="mt-4 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="rounded-lg border border-odds-border bg-odds-control/45 p-3">
           <p className="text-xs text-odds-muted">开盘赔率</p>
-          <p className="mt-1 text-lg font-bold numeric text-odds-text">{summary.openingOdds}</p>
+          <p className="mt-1 break-words text-base font-bold numeric leading-7 text-odds-text sm:text-lg">
+            {summary.openingOdds}
+          </p>
         </div>
-        <div className="surface-subtle p-3">
+        <div className="rounded-lg border border-odds-border bg-odds-control/45 p-3">
           <p className="text-xs text-odds-muted">当前赔率</p>
-          <p className={`mt-1 text-lg font-bold numeric ${changeTone(summary.changePercent)}`}>{summary.currentOdds}</p>
+          <p className={`mt-1 break-words text-base font-bold numeric leading-7 sm:text-lg ${changeTone(summary.changePercent)}`}>
+            {summary.currentOdds}
+          </p>
         </div>
       </div>
 

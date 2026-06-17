@@ -50,6 +50,18 @@ export interface AlertItem {
   time: string;
   level: AlertLevel;
   message: string;
+  riskLevel?: AlertLevel;
+  confidence?: '高' | '中' | '低' | string;
+  marketWeight?: '核心' | '中等' | '低流动性' | string;
+  triggerReason?: string;
+  confirmationNeeded?: string;
+}
+
+export interface DataCompleteness {
+  score: number;
+  maxScore: number;
+  missing: string[];
+  label: string;
 }
 
 export interface MatchData {
@@ -71,8 +83,10 @@ export interface MatchData {
   league?: string | null;
   matchNo?: string | null;
   sourceType?: string | null;
+  paused?: boolean;
   marketSummary: string;
   summaryCards: SummaryCardData[];
   markets: Record<MarketKey, MarketData>;
   alerts: AlertItem[];
+  dataCompleteness?: DataCompleteness;
 }

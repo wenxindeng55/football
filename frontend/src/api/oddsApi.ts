@@ -1,6 +1,6 @@
 import type { AlertItem, MarketData, MarketKey, MatchData, SummaryCardData } from '../types/odds';
 
-const DEFAULT_API_BASE_URL = 'http://127.0.0.1:8013';
+const DEFAULT_API_BASE_URL = '';
 
 function apiBaseUrl() {
   const configured = import.meta.env.VITE_API_BASE_URL?.trim();
@@ -109,6 +109,7 @@ export interface DiscoveryMatch {
   awayTeamZh: string;
   monitored: boolean;
   hidden: boolean;
+  paused: boolean;
 }
 
 export interface DiscoveryDateGroup {
@@ -124,7 +125,7 @@ export interface DiscoveryMatchesResponse {
 }
 
 export interface HideMatchResponse {
-  status: 'hidden';
+  status: 'hidden' | 'paused' | 'active';
   message: string;
   match: {
     name: string;
@@ -139,21 +140,21 @@ export function fetchHealth() {
   return requestJson<ApiHealth>('/api/health');
 }
 
-export function fetchMatches() {
-  return requestJson<MatchData[]>('/api/matches');
+export function fetchMatches(init?: RequestInit) {
+  return requestJson<MatchData[]>('/api/matches', init);
 }
 
-export function fetchMatch(matchId: string) {
-  return requestJson<MatchData>(`/api/matches/${encodeURIComponent(matchId)}`);
+export function fetchMatch(matchId: string, init?: RequestInit) {
+  return requestJson<MatchData>(`/api/matches/${encodeURIComponent(matchId)}`, init);
 }
 
 export function fetchMarkets(matchId: string) {
   return requestJson<ApiMarketInfo[]>(`/api/matches/${encodeURIComponent(matchId)}/markets`);
 }
 
-export function fetchOdds(matchId: string, market: string) {
-  const search = new URLSearchParams({ market });
-  return requestJson<ApiOddsResponse>(`/api/matches/${encodeURIComponent(matchId)}/odds?${search}`);
+export function fetchOdds(matchId: string, market: string, init?: RequestInit) {
+  const search = new URLSearchParams({ market, limit: '300' });
+  return requestJson<ApiOddsResponse>(`/api/matches/${encodeURIComponent(matchId)}/odds?${search}`, init);
 }
 
 export function fetchSummary(matchId: string) {
@@ -193,6 +194,18 @@ export function fetchDiscoveryMatches(days = 7) {
 
 export function hideMonitorMatch(matchId: string) {
   return requestJson<HideMatchResponse>(`/api/config/matches/${encodeURIComponent(matchId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function pauseMonitorMatch(matchId: string) {
+  return requestJson<HideMatchResponse>(`/api/config/matches/${encodeURIComponent(matchId)}/pause`, {
+    method: 'POST',
+  });
+}
+
+export function resumeMonitorMatch(matchId: string) {
+  return requestJson<HideMatchResponse>(`/api/config/matches/${encodeURIComponent(matchId)}/pause`, {
     method: 'DELETE',
   });
 }

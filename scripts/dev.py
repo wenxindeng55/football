@@ -119,9 +119,6 @@ def main() -> int:
     if not validate_environment(start_collector):
         return 1
 
-    frontend_env = os.environ.copy()
-    frontend_env.setdefault("VITE_API_BASE_URL", "http://127.0.0.1:8013")
-
     processes: list[tuple[str, subprocess.Popen[str]]] = []
     try:
         processes.append(
@@ -148,7 +145,7 @@ def main() -> int:
         processes.append(
             (
                 "frontend",
-                start_process("frontend", [npm_command(), "run", "dev"], FRONTEND_DIR, frontend_env),
+                start_process("frontend", [npm_command(), "run", "dev"], FRONTEND_DIR),
             )
         )
 

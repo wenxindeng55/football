@@ -124,9 +124,25 @@ export function OddsTrendChart({ market }: OddsTrendChartProps) {
     });
     return row;
   });
+  const latestSelections = market.selections.map((selection) => {
+    const latestPoint = selection.points[selection.points.length - 1];
+    const currentOdds = latestPoint?.odds ?? selection.openingOdds;
+    const changePercent = selection.openingOdds
+      ? ((currentOdds - selection.openingOdds) / selection.openingOdds) * 100
+      : 0;
+    return {
+      option: selection.option,
+      currentOdds,
+      changePercent,
+    };
+  });
+  const strongestSelection = [...latestSelections].sort(
+    (left, right) => Math.abs(right.changePercent) - Math.abs(left.changePercent),
+  )[0];
+  const warmingSelection = [...latestSelections].sort((left, right) => left.changePercent - right.changePercent)[0];
 
   return (
-    <section className="surface min-w-0 p-4 sm:p-5">
+    <section className="surface min-w-0 bg-odds-panel2/70 p-4 sm:p-5">
       <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
         <div>
           <h3 className="text-lg font-semibold text-odds-text">赔率走势图</h3>
@@ -138,7 +154,8 @@ export function OddsTrendChart({ market }: OddsTrendChartProps) {
         </div>
       </div>
 
-      <div className="h-[300px] min-w-0 sm:h-[340px]">
+      <div className="min-w-0 rounded-lg border border-odds-border bg-odds-control/30 p-3">
+        <div className="h-[300px] min-w-0 sm:h-[340px]">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={chartData} margin={{ top: 12, right: 14, left: -10, bottom: 0 }}>
             <CartesianGrid stroke={gridColor} strokeDasharray="4 4" vertical={false} />
@@ -177,6 +194,28 @@ export function OddsTrendChart({ market }: OddsTrendChartProps) {
             ))}
           </LineChart>
         </ResponsiveContainer>
+        </div>
+      </div>
+
+      <div className="mt-4 grid min-w-0 gap-3 md:grid-cols-3">
+        <div className="rounded-lg border border-odds-border bg-odds-control/40 p-3">
+          <p className="text-xs text-odds-muted">当前升温</p>
+          <p className="mt-1 truncate text-lg font-extrabold numeric text-odds-success">
+            {warmingSelection ? `${warmingSelection.option} ${formatOdds(warmingSelection.currentOdds)}` : '暂无'}
+          </p>
+        </div>
+        <div className="rounded-lg border border-odds-border bg-odds-control/40 p-3">
+          <p className="text-xs text-odds-muted">最大波动</p>
+          <p className="mt-1 text-lg font-extrabold numeric text-odds-warning">
+            {strongestSelection ? `${Math.abs(strongestSelection.changePercent).toFixed(1)}%` : '0.0%'}
+          </p>
+        </div>
+        <div className="rounded-lg border border-odds-border bg-odds-control/40 p-3">
+          <p className="text-xs text-odds-muted">最新方向</p>
+          <p className="mt-1 truncate text-lg font-extrabold text-odds-text">
+            {warmingSelection ? `${warmingSelection.option} 降赔` : '暂无'}
+          </p>
+        </div>
       </div>
     </section>
   );

@@ -57,6 +57,12 @@ function todaySingaporeKey() {
   return dateKey(now.year, now.month, now.day);
 }
 
+function singaporeDateKeyWithOffset(dayOffset: number) {
+  const now = singaporeDateParts(new Date());
+  const shifted = new Date(Date.UTC(now.year, now.month - 1, now.day + dayOffset));
+  return dateKey(shifted.getUTCFullYear(), shifted.getUTCMonth() + 1, shifted.getUTCDate());
+}
+
 function parseWithTimezone(value: string): ParsedSchedule | null {
   if (!/(?:z|[+-]\d{2}:?\d{2})$/i.test(value.trim())) return null;
   const date = new Date(value);
@@ -108,6 +114,23 @@ export function parseMatchSchedule(match: MatchData): ParsedSchedule | null {
 
   if (/数据更新/.test(match.matchTime)) return null;
   return parseDateTime(match.matchTime);
+}
+
+export function filterMatchesByScheduleWindow(matches: MatchData[], days = 2): MatchData[] {
+  const allowedKeys = new Set(Array.from({ length: days }, (_, index) => singaporeDateKeyWithOffset(index)));
+  return matches.filter((match) => {
+    const schedule = parseMatchSchedule(match);
+    return schedule ? allowedKeys.has(schedule.dateKey) : false;
+  });
+}
+
+export function filterMatchesForDashboard(matches: MatchData[], days = 2): MatchData[] {
+  const allowedKeys = new Set(Array.from({ length: days }, (_, index) => singaporeDateKeyWithOffset(index)));
+  return matches.filter((match) => {
+    if (match.sourceType === 'manual') return true;
+    const schedule = parseMatchSchedule(match);
+    return schedule ? allowedKeys.has(schedule.dateKey) : false;
+  });
 }
 
 function groupLabel(key: string) {

@@ -42,15 +42,24 @@ curl http://127.0.0.1:8013/api/health
 - `GET /api/matches`
 - `GET /api/matches/{matchId}`
 - `GET /api/matches/{matchId}/markets`
-- `GET /api/matches/{matchId}/odds?market=1X2`
+- `GET /api/matches/{matchId}/odds?market=1X2&limit=300`
 - `GET /api/matches/{matchId}/summary`
 - `GET /api/matches/{matchId}/alerts`
+- `GET /api/matches/{matchId}/lineups`
+- `GET /api/matches/{matchId}/injuries`
+- `GET /api/matches/{matchId}/standings`
+- `GET /api/matches/{matchId}/stats`
+- `GET /api/matches/{matchId}/events`
+- `GET /api/matches/{matchId}/insights`
+- `GET /api/matches/{matchId}/data-diagnostics`
 - `GET /api/matches/{matchId}/raw?market=1x2`
 - `GET /api/matches/{matchId}/export.csv?market=1x2`
 - `GET /api/matches/{matchId}/chart.png?market=1x2`
 - `GET /api/discovery/matches?days=7`
 - `POST /api/config/matches`
 - `DELETE /api/config/matches/{matchId}`
+- `POST /api/config/matches/{matchId}/pause`
+- `DELETE /api/config/matches/{matchId}/pause`
 
 后端默认读取 `config.json` 中的 `database` 字段；也可以用环境变量覆盖：
 
@@ -63,10 +72,12 @@ python -m uvicorn backend.api:app --reload --host 127.0.0.1 --port 8013
 
 ## 启动前端
 
-前端默认请求 `http://127.0.0.1:8013`。如需调整，复制或参考 `frontend/.env.example`：
+前端默认请求相对路径 `/api`。Vite 开发环境会通过 proxy 转发到 `http://127.0.0.1:8013`；真实部署时应由 Nginx、Node 或部署平台统一代理 `/api`。如需特殊跨域部署，可复制或参考 `frontend/.env.example`：
 
 ```powershell
-VITE_API_BASE_URL=http://127.0.0.1:8013
+VITE_API_BASE_URL=
+ODDS_API_PROXY_TARGET=http://127.0.0.1:8013
+VITE_ENABLE_MOCK_FALLBACK=false
 ```
 
 启动：
@@ -76,7 +87,7 @@ cd frontend
 npm run dev
 ```
 
-如果 API 请求失败或 SQLite 暂无数据，前端会自动回退到 `frontend/src/data/mockOdds.ts`。页面会每 60 秒自动刷新比赛列表和当前盘口明细。
+生产模式下 API 请求失败不会自动回退到 mock，错误会展示在数据诊断里。仅本地开发显式设置 `VITE_ENABLE_MOCK_FALLBACK=true` 时，前端才会使用开发种子数据保持页面结构可见。页面会每 60 秒自动刷新比赛列表和当前盘口明细。
 
 前端按钮联调说明：
 
@@ -84,7 +95,8 @@ npm run dev
 - “导出图表”会请求 `chart.png` 并下载后台生成的赔率折线图。
 - “查看原始数据”会请求 `raw` 并在页面弹窗展示 SQLite 快照行。
 - “添加监控比赛”默认请求 `GET /api/discovery/matches?days=7` 查询未来 7 天候选比赛，用户可按日期下拉选择比赛；提交后会请求 `POST /api/config/matches`，将比赛名称、URL、比赛时间、联赛和场次编号追加到 `config.json`，采集程序会在下一轮和自动发现的比赛一起采集。
-- “隐藏并停采”会请求 `DELETE /api/config/matches/{matchId}`，把比赛 URL 写入 `config.json` 的 `hidden_matches`，前端列表和后续采集都会过滤该比赛；SQLite、原始 HTML 和历史日志不会删除。
+- “隐藏此比赛”会请求 `DELETE /api/config/matches/{matchId}`，把比赛 URL 写入 `config.json` 的 `dashboard_hidden_matches`，只影响看板显示；SQLite、原始 HTML 和历史日志不会删除。
+- “暂停采集 / 恢复采集”会请求 `POST / DELETE /api/config/matches/{matchId}/pause`，把比赛 URL 写入或移出 `config.json` 的 `paused_matches`，用于控制采集程序是否跳过该比赛。
 - “设置”会打开前端主题设置面板，支持黑色、白色和自定义背景主题。
 
 ## 一键启动前后端和采集程序
@@ -121,6 +133,22 @@ python sgodds_collector.py run
 
 自动发现结果会追加记录到 `data/auto_matches.json`，不会覆盖 `config.json` 中的手动比赛。比赛中文名、主客队中文名、比赛时间、联赛、来源类型等元数据会写入 SQLite 的 `match_metadata` 表；赔率快照继续追加写入 `odds_snapshots` 表。
 
+## 接入赛前情报数据
+
+`scripts/fetch_match_intelligence.py` 用于抓取并入库首发、事件、技术统计、伤停和积分等扩展数据。已知外部赛事 ID 时可以直接执行：
+
+```powershell
+python scripts/fetch_match_intelligence.py --match-id "france-vs-senegal-a1c881" --external-match-id "1234567"
+```
+
+如果还没有外部赛事 ID，可先让脚本按内部比赛名、主客队和比赛日期自动搜索 TheSportsDB：
+
+```powershell
+python scripts/fetch_match_intelligence.py --match-id "france-vs-senegal-a1c881" --auto-map --dry-run
+```
+
+`--dry-run` 只输出候选映射和计划请求，不写入 SQLite。确认映射结果可信后，去掉 `--dry-run` 即可执行抓取和入库。映射失败、候选过近或数据源空响应会在 `/api/matches/{matchId}/data-diagnostics` 中体现为 `mapping_missing`、`fetch_failed`、`source_empty`、`parse_failed`、`ingest_failed` 或 `no_rows` 等状态。
+
 ## 后台日志
 
 后台日志会同时打印到控制台并追加写入本地文件：
@@ -150,14 +178,16 @@ python sgodds_collector.py plot --match "Iran vs New Zealand" --market "01 | 1X2
 2. 访问 `http://127.0.0.1:8013/api/matches`，确认返回 SQLite 中的比赛数据。
 3. 启动前端，打开 Vite 输出的本地地址。
 4. 在页面切换比赛卡片和盘口 Tab，确认图表、表格、摘要卡片和异动提醒正常展示。
-5. 停掉后端刷新前端，确认页面不会白屏，并回退到本地 mock data。
+5. 停掉后端刷新前端，确认数据诊断展示 API 错误；只有设置 `VITE_ENABLE_MOCK_FALLBACK=true` 时才会展示开发种子数据。
 
 ## 本地数据
 
 - SQLite：`data/sgodds_odds.sqlite3`
 - 原始 HTML：`data/raw_html/`
 - 自动发现比赛状态：`data/auto_matches.json`
-- 隐藏并停采配置：`config.json` 的 `hidden_matches`
+- 旧版隐藏并停采兼容配置：`config.json` 的 `hidden_matches`
+- 看板隐藏配置：`config.json` 的 `dashboard_hidden_matches`
+- 暂停采集配置：`config.json` 的 `paused_matches`
 - CSV 导出：`data/exports/`
 - 折线图：`data/plots/`
 - 日志文件：`data/logs/`

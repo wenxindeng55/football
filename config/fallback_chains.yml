@@ -1,0 +1,25 @@
+chains:
+  lineups:
+    - thesportsdb
+    - api_football
+    - sofascore
+  events:
+    - thesportsdb
+    - api_football
+    - sofascore
+  stats:
+    - thesportsdb
+    - api_football
+    - sofascore
+  injuries:
+    - api_football
+    - manual
+  standings:
+    - api_football
+    - sofascore
+    - manual
+
+policies:
+  stop_on_first_non_empty: true
+  persist_raw_payloads: true
+  allow_empty_success: true

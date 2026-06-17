@@ -152,15 +152,16 @@ def load_config(config_path: Path) -> AppConfig:
         )
 
     hidden_urls: set[str] = set()
-    for raw_match in raw_config.get("hidden_matches", []):
-        if isinstance(raw_match, str):
-            url = raw_match.strip()
-        elif isinstance(raw_match, dict):
-            url = str(raw_match.get("url", "")).strip()
-        else:
-            url = ""
-        if url:
-            hidden_urls.add(url)
+    for key in ("hidden_matches", "paused_matches"):
+        for raw_match in raw_config.get(key, []):
+            if isinstance(raw_match, str):
+                url = raw_match.strip()
+            elif isinstance(raw_match, dict):
+                url = str(raw_match.get("url", "")).strip()
+            else:
+                url = ""
+            if url:
+                hidden_urls.add(url)
 
     matches = [match for match in matches if match.url not in hidden_urls]
 
@@ -544,6 +545,14 @@ def merge_match_targets(manual_matches: list[MatchConfig], auto_matches: list[Ma
 def init_db(database_path: Path) -> None:
     database_path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(database_path) as connection:
+        def ensure_column(table_name: str, column_name: str, definition: str) -> None:
+            columns = {
+                str(row[1])
+                for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+            }
+            if column_name not in columns:
+                connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS odds_snapshots (
@@ -590,6 +599,474 @@ def init_db(database_path: Path) -> None:
             """
             CREATE INDEX IF NOT EXISTS idx_match_metadata_time
             ON match_metadata(match_time, source_type)
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS match_lineups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                match_id TEXT NOT NULL,
+                collected_at TEXT NOT NULL,
+                team_name TEXT NOT NULL,
+                formation TEXT,
+                lineup_confirmed INTEGER NOT NULL DEFAULT 0,
+                starters_json TEXT NOT NULL DEFAULT '[]',
+                substitutes_json TEXT NOT NULL DEFAULT '[]',
+                key_players_missing_json TEXT NOT NULL DEFAULT '[]',
+                source_url TEXT
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_match_lineups_match_time
+            ON match_lineups(match_id, collected_at)
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS match_injuries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                match_id TEXT NOT NULL,
+                collected_at TEXT NOT NULL,
+                team_name TEXT NOT NULL,
+                player_name TEXT NOT NULL,
+                status TEXT NOT NULL,
+                reason TEXT,
+                expected_return TEXT,
+                source_url TEXT
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_match_injuries_match_team_time
+            ON match_injuries(match_id, team_name, collected_at)
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS group_standings_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_name TEXT NOT NULL,
+                team_name TEXT NOT NULL,
+                collected_at TEXT NOT NULL,
+                points INTEGER NOT NULL DEFAULT 0,
+                played INTEGER NOT NULL DEFAULT 0,
+                wins INTEGER NOT NULL DEFAULT 0,
+                draws INTEGER NOT NULL DEFAULT 0,
+                losses INTEGER NOT NULL DEFAULT 0,
+                goals_for INTEGER NOT NULL DEFAULT 0,
+                goals_against INTEGER NOT NULL DEFAULT 0,
+                goal_difference INTEGER NOT NULL DEFAULT 0,
+                motivation_level TEXT,
+                motivation_text TEXT
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_group_standings_group_time
+            ON group_standings_snapshots(group_name, collected_at)
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_group_standings_team_time
+            ON group_standings_snapshots(team_name, collected_at)
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS match_live_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                match_id TEXT NOT NULL,
+                collected_at TEXT NOT NULL,
+                minute INTEGER,
+                team_name TEXT NOT NULL,
+                possession REAL,
+                shots INTEGER,
+                shots_on_target INTEGER,
+                corners INTEGER,
+                dangerous_attacks INTEGER,
+                xg REAL,
+                yellow_cards INTEGER,
+                red_cards INTEGER
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_match_live_stats_match_time
+            ON match_live_stats(match_id, collected_at, minute)
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS match_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                match_id TEXT NOT NULL,
+                event_time TEXT NOT NULL,
+                minute INTEGER,
+                team_name TEXT,
+                event_type TEXT NOT NULL,
+                player_name TEXT,
+                description TEXT,
+                raw_json TEXT NOT NULL DEFAULT '{}'
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_match_events_match_time
+            ON match_events(match_id, event_time, minute)
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS odds_event_links (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                match_id TEXT NOT NULL,
+                collected_at TEXT NOT NULL,
+                odds_snapshot_id INTEGER,
+                event_id INTEGER,
+                link_type TEXT NOT NULL,
+                explanation TEXT NOT NULL,
+                confidence REAL NOT NULL DEFAULT 0
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_odds_event_links_match_time
+            ON odds_event_links(match_id, collected_at)
+            """
+        )
+        for column_name, definition in (
+            ("source", "TEXT"),
+            ("external_match_id", "TEXT"),
+            ("home_formation", "TEXT"),
+            ("away_formation", "TEXT"),
+            ("status", "TEXT"),
+            ("published_at", "TEXT"),
+            ("fetched_at", "TEXT"),
+            ("created_at", "TEXT"),
+            ("updated_at", "TEXT"),
+        ):
+            ensure_column("match_lineups", column_name, definition)
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS lineup_players (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                lineup_id INTEGER,
+                match_id TEXT NOT NULL,
+                team_id TEXT,
+                team_name TEXT,
+                team_side TEXT,
+                external_match_id TEXT,
+                player_id TEXT,
+                player_name TEXT NOT NULL,
+                shirt_number TEXT,
+                position TEXT,
+                is_starting INTEGER NOT NULL DEFAULT 0,
+                is_captain INTEGER NOT NULL DEFAULT 0,
+                sort_order INTEGER,
+                source TEXT,
+                created_at TEXT,
+                updated_at TEXT
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_lineup_players_match_side
+            ON lineup_players(match_id, team_side, is_starting, sort_order)
+            """
+        )
+        for column_name, definition in (
+            ("team_name", "TEXT"),
+            ("external_match_id", "TEXT"),
+        ):
+            ensure_column("lineup_players", column_name, definition)
+        for column_name, definition in (
+            ("source", "TEXT"),
+            ("external_match_id", "TEXT"),
+            ("external_event_id", "TEXT"),
+            ("team_id", "TEXT"),
+            ("team_side", "TEXT"),
+            ("player_id", "TEXT"),
+            ("related_player_id", "TEXT"),
+            ("related_player_name", "TEXT"),
+            ("stoppage_minute", "INTEGER"),
+            ("created_at", "TEXT"),
+            ("updated_at", "TEXT"),
+        ):
+            ensure_column("match_events", column_name, definition)
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS match_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                match_id TEXT NOT NULL,
+                source TEXT,
+                external_match_id TEXT,
+                team_id TEXT,
+                team_side TEXT,
+                stat_time TEXT,
+                minute INTEGER,
+                team_name TEXT,
+                possession REAL,
+                shots INTEGER,
+                shots_on_target INTEGER,
+                shots_off_target INTEGER,
+                blocked_shots INTEGER,
+                corners INTEGER,
+                attacks INTEGER,
+                dangerous_attacks INTEGER,
+                fouls INTEGER,
+                offsides INTEGER,
+                total_passes INTEGER,
+                accurate_passes INTEGER,
+                pass_accuracy REAL,
+                yellow_cards INTEGER,
+                red_cards INTEGER,
+                xg REAL,
+                created_at TEXT,
+                updated_at TEXT
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_match_stats_match_time
+            ON match_stats(match_id, stat_time, team_side)
+            """
+        )
+        for column_name, definition in (
+            ("minute", "INTEGER"),
+            ("team_name", "TEXT"),
+            ("external_match_id", "TEXT"),
+            ("shots_off_target", "INTEGER"),
+            ("blocked_shots", "INTEGER"),
+            ("offsides", "INTEGER"),
+            ("total_passes", "INTEGER"),
+            ("accurate_passes", "INTEGER"),
+            ("pass_accuracy", "REAL"),
+        ):
+            ensure_column("match_stats", column_name, definition)
+        for column_name, definition in (
+            ("source", "TEXT"),
+            ("team_id", "TEXT"),
+            ("team_side", "TEXT"),
+            ("stat_time", "TEXT"),
+            ("attacks", "INTEGER"),
+            ("fouls", "INTEGER"),
+            ("created_at", "TEXT"),
+            ("updated_at", "TEXT"),
+        ):
+            ensure_column("match_live_stats", column_name, definition)
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS injuries_suspensions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                match_id TEXT NOT NULL,
+                external_match_id TEXT,
+                team_id TEXT,
+                team_side TEXT,
+                player_id TEXT,
+                player_name TEXT NOT NULL,
+                type TEXT NOT NULL,
+                reason TEXT,
+                expected_return TEXT,
+                source TEXT,
+                fetched_at TEXT,
+                created_at TEXT,
+                updated_at TEXT
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_injuries_suspensions_match_side
+            ON injuries_suspensions(match_id, team_side, type)
+            """
+        )
+        ensure_column("injuries_suspensions", "external_match_id", "TEXT")
+        for column_name, definition in (
+            ("team_id", "TEXT"),
+            ("team_side", "TEXT"),
+            ("player_id", "TEXT"),
+            ("type", "TEXT"),
+            ("fetched_at", "TEXT"),
+            ("created_at", "TEXT"),
+            ("updated_at", "TEXT"),
+        ):
+            ensure_column("match_injuries", column_name, definition)
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS group_standings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                competition_id TEXT,
+                group_name TEXT NOT NULL,
+                team_id TEXT,
+                team_name TEXT NOT NULL,
+                played INTEGER NOT NULL DEFAULT 0,
+                won INTEGER NOT NULL DEFAULT 0,
+                drawn INTEGER NOT NULL DEFAULT 0,
+                lost INTEGER NOT NULL DEFAULT 0,
+                goals_for INTEGER NOT NULL DEFAULT 0,
+                goals_against INTEGER NOT NULL DEFAULT 0,
+                goal_difference INTEGER NOT NULL DEFAULT 0,
+                points INTEGER NOT NULL DEFAULT 0,
+                rank INTEGER,
+                qualification_status TEXT,
+                motivation_level TEXT,
+                motivation_text TEXT,
+                source TEXT,
+                fetched_at TEXT,
+                created_at TEXT,
+                updated_at TEXT
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_group_standings_team
+            ON group_standings(group_name, team_name, fetched_at)
+            """
+        )
+        for column_name, definition in (
+            ("motivation_level", "TEXT"),
+            ("motivation_text", "TEXT"),
+        ):
+            ensure_column("group_standings", column_name, definition)
+        for column_name, definition in (
+            ("competition_id", "TEXT"),
+            ("team_id", "TEXT"),
+            ("rank", "INTEGER"),
+            ("qualification_status", "TEXT"),
+            ("source", "TEXT"),
+            ("fetched_at", "TEXT"),
+            ("created_at", "TEXT"),
+            ("updated_at", "TEXT"),
+        ):
+            ensure_column("group_standings_snapshots", column_name, definition)
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS match_source_map (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                internal_match_id TEXT NOT NULL,
+                source TEXT,
+                external_match_id TEXT,
+                external_league_id TEXT,
+                home_team_name TEXT,
+                away_team_name TEXT,
+                kickoff_utc TEXT,
+                mapping_status TEXT,
+                odds_source TEXT,
+                odds_external_match_id TEXT,
+                lineup_source TEXT,
+                lineup_external_match_id TEXT,
+                stats_source TEXT,
+                stats_external_match_id TEXT,
+                events_source TEXT,
+                events_external_match_id TEXT,
+                home_team_name_normalized TEXT,
+                away_team_name_normalized TEXT,
+                match_time_utc TEXT,
+                confidence_score REAL,
+                created_at TEXT,
+                updated_at TEXT
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_match_source_map_internal
+            ON match_source_map(internal_match_id)
+            """
+        )
+        for column_name, definition in (
+            ("source", "TEXT"),
+            ("external_match_id", "TEXT"),
+            ("external_league_id", "TEXT"),
+            ("home_team_name", "TEXT"),
+            ("away_team_name", "TEXT"),
+            ("kickoff_utc", "TEXT"),
+            ("mapping_status", "TEXT"),
+        ):
+            ensure_column("match_source_map", column_name, definition)
+        connection.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_match_source_map_internal_source
+            ON match_source_map(internal_match_id, source)
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS raw_source_payloads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source TEXT NOT NULL,
+                data_type TEXT NOT NULL,
+                internal_match_id TEXT,
+                external_match_id TEXT,
+                request_url TEXT,
+                http_status INTEGER,
+                fetched_at TEXT NOT NULL,
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                error_message TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_raw_source_payloads_match_type
+            ON raw_source_payloads(internal_match_id, source, data_type, fetched_at)
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS source_health (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source TEXT NOT NULL,
+                data_type TEXT NOT NULL,
+                last_success_at TEXT,
+                last_error_at TEXT,
+                last_error_message TEXT,
+                success_count INTEGER NOT NULL DEFAULT 0,
+                error_count INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_source_health_source_type
+            ON source_health(source, data_type)
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS fetch_job_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_name TEXT NOT NULL,
+                source TEXT NOT NULL,
+                data_type TEXT NOT NULL,
+                internal_match_id TEXT,
+                external_match_id TEXT,
+                status TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                finished_at TEXT NOT NULL,
+                rows_written INTEGER NOT NULL DEFAULT 0,
+                message TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_fetch_job_logs_match_time
+            ON fetch_job_logs(internal_match_id, source, data_type, started_at)
             """
         )
 
