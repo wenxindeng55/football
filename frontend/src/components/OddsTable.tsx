@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import type { OddsTableRow } from '../types/odds';
 import { changeTone, formatOdds, formatPercent } from '../utils/format';
+import { EmptyState } from './DataStatus';
 
 interface OddsTableProps {
   rows: OddsTableRow[];
 }
 
-const PAGE_SIZE = 30;
+const PAGE_SIZE = 20;
 
 export function OddsTable({ rows }: OddsTableProps) {
   const [page, setPage] = useState(1);
@@ -95,8 +96,14 @@ export function OddsTable({ rows }: OddsTableProps) {
           })}
         </div>
         {!hasRows ? (
-          <div className="mt-3 grid min-h-[120px] place-items-center rounded-lg border border-odds-border bg-odds-control/45 text-sm text-odds-muted">
-            当前盘口类型暂无快照记录。
+          <div className="mt-3">
+            <EmptyState
+              title="盘口变化表格"
+              reasonCode="database_no_records"
+              reason="数据库当前没有该比赛和盘口类型对应的快照记录。"
+              rowCount={0}
+              suggestedAction="确认采集任务是否运行，并检查 match_id 与 match_url 是否匹配。"
+            />
           </div>
         ) : null}
       </div>
@@ -129,9 +136,13 @@ export function OddsTable({ rows }: OddsTableProps) {
           );
         })}
         {!hasRows ? (
-          <div className="grid min-h-[120px] place-items-center rounded-lg border border-odds-border bg-odds-control/45 text-sm text-odds-muted">
-            当前盘口类型暂无快照记录。
-          </div>
+          <EmptyState
+            title="盘口变化表格"
+            reasonCode="database_no_records"
+            reason="数据库当前没有该比赛和盘口类型对应的快照记录。"
+            rowCount={0}
+            suggestedAction="确认采集任务是否运行，并检查 match_id 与 match_url 是否匹配。"
+          />
         ) : null}
       </div>
     </section>

@@ -11,6 +11,7 @@ interface MatchCardProps {
   onPause: (id: string) => void;
   onResume: (id: string) => void;
   hiding: boolean;
+  canManage: boolean;
 }
 
 function riskLabel(score: number) {
@@ -34,7 +35,7 @@ function sparkColor(score: number) {
   return '#39d0ff';
 }
 
-export function MatchCard({ match, selected, riskScore, onSelect, onHide, onPause, onResume, hiding }: MatchCardProps) {
+export function MatchCard({ match, selected, riskScore, onSelect, onHide, onPause, onResume, hiding, canManage }: MatchCardProps) {
   const safeRiskScore = Math.min(100, Math.max(0, riskScore));
 
   return (
@@ -104,7 +105,7 @@ export function MatchCard({ match, selected, riskScore, onSelect, onHide, onPaus
         </svg>
       </div>
 
-      <div className="mt-4 flex flex-wrap justify-end gap-2">
+      {canManage ? <div className="mt-4 flex flex-wrap justify-end gap-2">
         <button
           type="button"
           disabled={hiding}
@@ -115,7 +116,7 @@ export function MatchCard({ match, selected, riskScore, onSelect, onHide, onPaus
           className="focus-ring inline-flex items-center gap-1.5 rounded-lg border border-odds-border bg-odds-control px-2.5 py-1.5 text-xs text-odds-muted hover:border-odds-danger/50 hover:text-odds-danger disabled:cursor-not-allowed disabled:opacity-60"
         >
           <EyeOff className="h-3.5 w-3.5" />
-          {hiding ? '处理中' : '隐藏'}
+          {hiding ? '处理中' : '隐藏此比赛'}
         </button>
         <button
           type="button"
@@ -133,7 +134,7 @@ export function MatchCard({ match, selected, riskScore, onSelect, onHide, onPaus
           {match.paused ? <PlayCircle className="h-3.5 w-3.5" /> : <PauseCircle className="h-3.5 w-3.5" />}
           {hiding ? '处理中' : match.paused ? '恢复采集' : '暂停采集'}
         </button>
-      </div>
+      </div> : null}
     </article>
   );
 }

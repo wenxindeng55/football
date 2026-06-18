@@ -27,6 +27,18 @@ def _normalize_status(value: Any) -> str:
     return _text(value).lower().replace(" ", "_")
 
 
+def _confidence_label(score: float) -> str:
+    if score >= 0.66:
+        return "高"
+    if score >= 0.42:
+        return "中"
+    return "低"
+
+
+def _has_rows(rows: list[dict[str, Any]]) -> bool:
+    return len(rows) > 0
+
+
 def _is_confirmed_lineup(lineups: list[dict[str, Any]]) -> bool:
     return any(bool(lineup.get("lineupConfirmed")) for lineup in lineups)
 
@@ -175,6 +187,7 @@ def _correlations(
     events: list[dict[str, Any]],
     odds_rows: list[dict[str, Any]],
     lineups: list[dict[str, Any]],
+    latest_stats: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     if explicit_links:
         return explicit_links
@@ -252,11 +265,34 @@ def _correlations(
         )
 
     if not inferred and odds_rows:
+        missing_context = []
+        if not events:
+            missing_context.append("事件")
+        if not lineups:
+            missing_context.append("首发")
+        if not latest_stats:
+            missing_context.append("统计")
+
+        if missing_context:
+            missing_text = "、".join(missing_context)
+            inferred.append(
+                {
+                    "id": "inferred-market-only-low-confidence",
+                    "linkType": "unknown",
+                    "explanation": (
+                        f"由于{missing_text}数据缺失，当前只能判断为未找到事件触发点，"
+                        "不能确认就是市场资金行为。可信度：低。"
+                    ),
+                    "confidence": 0.24,
+                }
+            )
+            return inferred
+
         inferred.append(
             {
                 "id": "inferred-market-only",
                 "linkType": "market_only",
-                "explanation": "当前盘口有变化，但暂未找到明确比赛事件触发点，可能是市场资金行为。",
+                "explanation": "当前盘口有变化，且未找到明确比赛事件触发点，可作为市场行为线索继续观察。",
                 "confidence": 0.42,
             }
         )
@@ -280,12 +316,13 @@ def build_match_insights(
     injury_message, injury_severity = _injury_message(injuries)
     standing_message, standing_severity = _standing_message(standings)
     live_message, live_severity = _live_stats_message(latest_stats, _text(market.get("team")), meta)
-    correlations = _correlations(explicit_links, events, odds_rows, lineups)
+    correlations = _correlations(explicit_links, events, odds_rows, lineups, latest_stats)
     consistency = (
         correlations[0]["explanation"]
         if correlations
         else "盘口变化和比赛事件之间暂无可用关联，需要等待事件或盘口快照补充。"
     )
+    consistency_confidence = _confidence_label(_number(correlations[0].get("confidence")) if correlations else 0.2)
 
     return {
         "matchId": match_id,
@@ -298,6 +335,7 @@ def build_match_insights(
                 "title": "盘口方向",
                 "message": market["message"],
                 "severity": market["severity"],
+                "confidence": "中" if _has_rows(odds_rows) else "低",
             },
             {
                 "id": "lineup-impact",
@@ -305,6 +343,7 @@ def build_match_insights(
                 "title": "首发影响",
                 "message": lineup_message,
                 "severity": lineup_severity,
+                "confidence": "中" if _has_rows(lineups) else "低",
             },
             {
                 "id": "injury-impact",
@@ -312,6 +351,7 @@ def build_match_insights(
                 "title": "伤停影响",
                 "message": injury_message,
                 "severity": injury_severity,
+                "confidence": "中" if _has_rows(injuries) else "低",
             },
             {
                 "id": "group-motivation",
@@ -319,6 +359,7 @@ def build_match_insights(
                 "title": "小组动力",
                 "message": standing_message,
                 "severity": standing_severity,
+                "confidence": "中" if _has_rows(standings) else "低",
             },
             {
                 "id": "live-pressure",
@@ -326,6 +367,7 @@ def build_match_insights(
                 "title": "赛中真实压制",
                 "message": live_message,
                 "severity": live_severity,
+                "confidence": "中" if len(latest_stats) >= 2 else "低",
             },
             {
                 "id": "event-market-consistency",
@@ -333,6 +375,7 @@ def build_match_insights(
                 "title": "盘口与事件一致性",
                 "message": consistency,
                 "severity": "info",
+                "confidence": consistency_confidence,
             },
         ],
         "correlations": correlations,

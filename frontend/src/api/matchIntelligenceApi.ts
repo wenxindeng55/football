@@ -34,7 +34,7 @@ function joinPath(path: string) {
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(joinPath(path), init);
+  const response = await fetch(joinPath(path), { credentials: 'include', ...init });
   if (!response.ok) {
     throw new Error(`API 请求失败：${response.status} ${response.statusText}`);
   }

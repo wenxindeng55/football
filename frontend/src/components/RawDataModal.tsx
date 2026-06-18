@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import type { RawOddsRow } from '../api/oddsApi';
 import { formatOdds, formatPercent } from '../utils/format';
 import { localizeText } from '../utils/display';
+import { EmptyState } from './DataStatus';
 
 interface RawDataModalProps {
   open: boolean;
@@ -119,7 +120,13 @@ export function RawDataModal({ open, rows, loading, onClose }: RawDataModalProps
                 </tbody>
               </table>
               {rows.length === 0 && (
-                <div className="grid min-h-[180px] place-items-center text-sm text-odds-muted">当前盘口暂无原始数据</div>
+                <EmptyState
+                  title="原始采集数据"
+                  reasonCode="database_no_records"
+                  reason="数据库当前没有该比赛和盘口筛选条件下的原始快照记录。"
+                  rowCount={0}
+                  suggestedAction="确认采集任务、match_id 映射和 SQLite 快照表是否正常。"
+                />
               )}
             </div>
           </div>

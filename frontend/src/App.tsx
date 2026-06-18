@@ -4,21 +4,26 @@ import {
   addMonitorMatch,
   downloadChart,
   downloadCsv,
+  fetchHealth,
   fetchMatch,
   fetchMatches,
   fetchOdds,
-  fetchRawOdds,
   hideMonitorMatch,
   pauseMonitorMatch,
   resumeMonitorMatch,
   type AddMonitorMatchPayload,
-  type RawOddsRow,
+  type ApiHealth,
 } from './api/oddsApi';
+import { fetchAuthSession, logoutAdmin, type AuthUser } from './api/authApi';
 import { fetchMatchIntelligence } from './api/matchIntelligenceApi';
 import { ActionBar } from './components/ActionBar';
 import { AddMatchModal } from './components/AddMatchModal';
+import { AdminLoginModal } from './components/AdminLoginModal';
 import { AlertPanel } from './components/AlertPanel';
+import { ConfirmActionDialog } from './components/ConfirmActionDialog';
 import { DataDiagnosticsPanel } from './components/DataDiagnosticsPanel';
+import { EmptyState, LoadingState } from './components/DataStatus';
+import type { DataHealthItem } from './components/DataHealthSummary';
 import { DataStatusPanel } from './components/DataStatusPanel';
 import { GroupMotivationPanel } from './components/GroupMotivationPanel';
 import { Header } from './components/Header';
@@ -26,6 +31,7 @@ import { InjuryPanel } from './components/InjuryPanel';
 import { LineupPanel } from './components/LineupPanel';
 import { LiveStatsPanel } from './components/LiveStatsPanel';
 import { MarketTabs } from './components/MarketTabs';
+import { MobileMatchSelector } from './components/MobileMatchSelector';
 import { MatchEventTimeline } from './components/MatchEventTimeline';
 import { MatchDateGroup } from './components/MatchDateGroup';
 import { MatchInsightPanel } from './components/MatchInsightPanel';
@@ -33,7 +39,7 @@ import { MatchOverview } from './components/MatchOverview';
 import { OddsSummaryCard } from './components/OddsSummaryCard';
 import { OddsEventCorrelationPanel } from './components/OddsEventCorrelationPanel';
 import { OddsTable } from './components/OddsTable';
-import { RawDataModal } from './components/RawDataModal';
+import { RawOddsPanel } from './components/RawOddsPanel';
 import { ThemePanel, type ThemeMode } from './components/ThemePanel';
 import { Toast, type ToastMessage } from './components/Toast';
 import { getEmptyMatchIntelligence, getErrorMatchIntelligence, getMockMatchIntelligence } from './data/mockMatchIntelligence';
@@ -189,13 +195,13 @@ function App() {
   const [marketLoading, setMarketLoading] = useState(false);
   const [matchIntelligence, setMatchIntelligence] = useState<MatchIntelligence>(() => getEmptyMatchIntelligence(''));
   const [intelligenceLoading, setIntelligenceLoading] = useState(false);
+  const [apiHealth, setApiHealth] = useState<ApiHealth | null>(null);
+  const [healthError, setHealthError] = useState<string | null>(null);
   const [loadingAction, setLoadingAction] = useState<ActionKey | null>(null);
-  const [rawRows, setRawRows] = useState<RawOddsRow[]>([]);
-  const [rawModalOpen, setRawModalOpen] = useState(false);
-  const [rawLoading, setRawLoading] = useState(false);
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [addingMatch, setAddingMatch] = useState(false);
   const [hidingMatchId, setHidingMatchId] = useState<string | null>(null);
+  const [pauseConfirmMatchId, setPauseConfirmMatchId] = useState<string | null>(null);
   const [themePanelOpen, setThemePanelOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeMode>(() => (localStorage.getItem('odds-theme') as ThemeMode | null) ?? 'dark');
   const [customBackground, setCustomBackground] = useState(() => localStorage.getItem('odds-custom-bg') ?? '#0b1220');
@@ -204,10 +210,64 @@ function App() {
   );
   const [matchSearch, setMatchSearch] = useState('');
   const [toast, setToast] = useState<ToastMessage | null>(null);
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authChecking, setAuthChecking] = useState(true);
+  const [loginModalOpen, setLoginModalOpen] = useState(false);
+  const [openAddAfterLogin, setOpenAddAfterLogin] = useState(false);
 
   const showToast = useCallback((tone: ToastMessage['tone'], text: string) => {
     setToast({ id: Date.now(), tone, text });
   }, []);
+  const canManage = authUser?.role === 'admin';
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchAuthSession()
+      .then((session) => {
+        if (!cancelled) setAuthUser(session.authenticated ? session.user : null);
+      })
+      .catch((error) => {
+        console.warn('管理员登录状态检查失败。', error);
+        if (!cancelled) setAuthUser(null);
+      })
+      .finally(() => {
+        if (!cancelled) setAuthChecking(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function requireAdminForAction(message = '请先登录管理员账号。') {
+    if (canManage) return true;
+    showToast('info', message);
+    setLoginModalOpen(true);
+    return false;
+  }
+
+  function handleLoginSuccess(user: AuthUser) {
+    setAuthUser(user);
+    setLoginModalOpen(false);
+    showToast('success', '管理员登录成功。');
+    if (openAddAfterLogin) {
+      setOpenAddAfterLogin(false);
+      setAddModalOpen(true);
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      await logoutAdmin();
+      showToast('info', '管理员已退出登录。');
+    } catch (error) {
+      console.warn('管理员退出登录失败。', error);
+      showToast('error', '退出登录失败，请稍后重试。');
+    } finally {
+      setAuthUser(null);
+      setAddModalOpen(false);
+      setOpenAddAfterLogin(false);
+    }
+  }
 
   const loadMatches = useCallback(async () => {
     try {
@@ -257,6 +317,32 @@ function App() {
     }, REFRESH_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [loadMatches]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadHealth = () => {
+      fetchHealth()
+        .then((health) => {
+          if (cancelled) return;
+          setApiHealth(health);
+          setHealthError(null);
+        })
+        .catch((error) => {
+          if (cancelled) return;
+          const message = error instanceof Error ? error.message : String(error);
+          setHealthError(message);
+          setApiHealth(null);
+        });
+    };
+
+    loadHealth();
+    const timer = window.setInterval(loadHealth, REFRESH_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -415,7 +501,48 @@ function App() {
     selectedMatchId,
   ]);
   const headerUpdatedAt =
-    initialMatchesLoading && matches.length === 0 ? '加载中' : hasVisibleMatches ? selectedMatch.updatedAt : '暂无数据';
+    initialMatchesLoading && matches.length === 0 ? '加载中' : hasVisibleMatches ? selectedMatch.updatedAt : '接口返回 0 条';
+  const healthItems = useMemo<DataHealthItem[]>(() => {
+    const sourceByType = (dataType: string) =>
+      matchIntelligence.diagnostics.sources.find((source) => source.dataType === dataType || source.name === dataType);
+    const sourceStatus = (dataType: string): DataHealthItem => {
+      const labels: Record<string, string> = {
+        lineups: '首发',
+        events: '事件',
+        stats: '统计',
+      };
+      const source = sourceByType(dataType);
+      if (!source) return { label: labels[dataType] ?? dataType, value: '接口未调用', tone: 'info' };
+      const status = source.status.toLowerCase();
+      if (source.rowCount > 0 && !status.includes('failed') && !status.includes('error')) {
+        return { label: labels[dataType] ?? dataType, value: '正常', tone: 'success' };
+      }
+      if (status.includes('not_configured')) return { label: labels[dataType] ?? dataType, value: '未配置', tone: 'warning' };
+      if (status.includes('mapping')) return { label: labels[dataType] ?? dataType, value: '映射失败', tone: 'warning' };
+      if (status.includes('failed') || status.includes('error')) return { label: labels[dataType] ?? dataType, value: '采集失败', tone: 'danger' };
+      return { label: labels[dataType] ?? dataType, value: '缺失', tone: 'warning' };
+    };
+    const completenessScore = selectedMatch.dataCompleteness
+      ? selectedMatch.dataCompleteness.score / Math.max(selectedMatch.dataCompleteness.maxScore, 1)
+      : 0;
+    const oddsNormal = Boolean(apiHealth?.databaseExists && apiHealth.tableExists && apiHealth.matchCount > 0);
+
+    return [
+      {
+        label: '盘口',
+        value: oddsNormal ? '正常' : healthError ? '接口未调用' : '缺失',
+        tone: oddsNormal ? 'success' : healthError ? 'danger' : 'warning',
+      },
+      sourceStatus('lineups'),
+      sourceStatus('events'),
+      sourceStatus('stats'),
+      {
+        label: '数据完整度',
+        value: selectedMatch.dataCompleteness?.label ?? '0/100',
+        tone: completenessScore >= 0.7 ? 'success' : completenessScore >= 0.4 ? 'warning' : 'danger',
+      },
+    ];
+  }, [apiHealth, healthError, matchIntelligence.diagnostics.sources, selectedMatch.dataCompleteness]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -484,6 +611,7 @@ function App() {
   }
 
   async function handleExportCsv() {
+    if (!requireAdminForAction('导出 CSV 需要管理员登录。')) return;
     setLoadingAction('csv');
     try {
       const { blob, filename } = await downloadCsv(selectedMatch.id, activeMarket);
@@ -498,6 +626,7 @@ function App() {
   }
 
   async function handleExportChart() {
+    if (!requireAdminForAction('导出图表需要管理员登录。')) return;
     setLoadingAction('chart');
     try {
       const { blob, filename } = await downloadChart(selectedMatch.id, activeMarket);
@@ -511,25 +640,23 @@ function App() {
     }
   }
 
-  async function handleViewRawData() {
-    setRawModalOpen(true);
-    setRawLoading(true);
-    setLoadingAction('raw');
-    try {
-      const response = await fetchRawOdds(selectedMatch.id, activeMarket);
-      setRawRows(response.rows);
-      showToast('success', '原始数据已从后台读取。');
-    } catch (error) {
-      console.warn('原始数据读取失败。', error);
-      setRawRows([]);
-      showToast('error', '原始数据读取失败，请确认后台已启动且 SQLite 有当前比赛数据。');
-    } finally {
-      setRawLoading(false);
-      setLoadingAction(null);
+  function handleViewRawData() {
+    if (!requireAdminForAction('查看原始数据需要管理员登录。')) return;
+    setActiveDetailTab('raw');
+    showToast('info', '已切换到原始数据页签，表格将按 20 条分页读取。');
+  }
+
+  function handleOpenAddMatch() {
+    if (!canManage) {
+      setOpenAddAfterLogin(true);
+      requireAdminForAction('添加监控比赛需要管理员登录。');
+      return;
     }
+    setAddModalOpen(true);
   }
 
   async function handleAddMonitorMatch(payload: AddMonitorMatchPayload) {
+    if (!requireAdminForAction('添加监控比赛需要管理员登录。')) return;
     if (!payload.url) {
       showToast('error', '请填写比赛 URL。');
       return;
@@ -551,6 +678,7 @@ function App() {
   }
 
   async function handleHideMonitorMatch(matchId: string) {
+    if (!requireAdminForAction('隐藏比赛需要管理员登录。')) return;
     const match = matches.find((item) => item.id === matchId);
     if (!match) return;
     const confirmed = window.confirm(`确认从看板隐藏「${match.name}」吗？采集状态不会改变，历史数据会保留。`);
@@ -580,12 +708,16 @@ function App() {
     }
   }
 
-  async function handlePauseMonitorMatch(matchId: string) {
+  function handlePauseMonitorMatch(matchId: string) {
+    if (!requireAdminForAction('暂停采集需要管理员登录。')) return;
     const match = matches.find((item) => item.id === matchId);
     if (!match) return;
-    const confirmed = window.confirm(`确认暂停采集「${match.name}」吗？看板会保留历史数据，但后续采集会跳过该比赛。`);
-    if (!confirmed) return;
+    setPauseConfirmMatchId(matchId);
+  }
 
+  async function confirmPauseMonitorMatch() {
+    const matchId = pauseConfirmMatchId;
+    if (!matchId) return;
     setHidingMatchId(matchId);
     try {
       const response = await pauseMonitorMatch(matchId);
@@ -597,10 +729,12 @@ function App() {
       showToast('error', '暂停采集失败，请确认后台配置文件可写。');
     } finally {
       setHidingMatchId(null);
+      setPauseConfirmMatchId(null);
     }
   }
 
   async function handleResumeMonitorMatch(matchId: string) {
+    if (!requireAdminForAction('恢复采集需要管理员登录。')) return;
     setHidingMatchId(matchId);
     try {
       const response = await resumeMonitorMatch(matchId);
@@ -665,8 +799,8 @@ function App() {
         {includeChart ? (
           <Suspense
             fallback={
-              <section className="surface grid min-h-[320px] place-items-center p-5 text-sm text-odds-muted">
-                正在加载赔率走势图...
+              <section className="surface p-5">
+                <LoadingState title="正在加载赔率走势图..." />
               </section>
             }
           >
@@ -717,7 +851,7 @@ function App() {
           </section>
         );
       case 'raw':
-        return renderOddsWorkspace(false);
+        return <RawOddsPanel matchId={selectedMatch.id} canRead={canManage} />;
       case 'diagnostics':
         return <DataDiagnosticsPanel data={matchIntelligence.diagnostics} />;
       case 'overview':
@@ -750,6 +884,7 @@ function App() {
         );
     }
   })();
+  const pauseConfirmMatch = pauseConfirmMatchId ? matches.find((match) => match.id === pauseConfirmMatchId) : null;
 
   return (
     <main className="min-h-screen min-w-0 px-3 py-4 text-odds-text sm:px-5 lg:px-6 lg:py-7">
@@ -757,13 +892,27 @@ function App() {
         <Header
           updatedAt={headerUpdatedAt}
           timezone="Asia/Singapore"
+          healthItems={healthItems}
           exporting={loadingAction === 'csv'}
-          exportDisabled={!hasVisibleMatches}
+          exportDisabled={!hasVisibleMatches || !canManage}
+          adminUsername={authUser?.username ?? null}
+          authChecking={authChecking}
           onExportCsv={handleExportCsv}
           onOpenSettings={() => setThemePanelOpen(true)}
+          onLogin={() => setLoginModalOpen(true)}
+          onLogout={() => void handleLogout()}
         />
 
-        <section className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {hasVisibleMatches ? (
+          <MobileMatchSelector
+            matches={radarMatches.length > 0 ? radarMatches : visibleMatches}
+            selectedMatchId={selectedMatch.id}
+            riskScores={matchRiskScores}
+            onSelect={(id) => void handleSelectMatch(id)}
+          />
+        ) : null}
+
+        <section className="grid min-w-0 grid-cols-2 gap-3 xl:grid-cols-4">
           {dashboardMetrics.map((metric) => {
             const Icon = metric.Icon;
             return (
@@ -783,8 +932,8 @@ function App() {
           })}
         </section>
 
-        <div className="grid min-w-0 gap-5 lg:grid-cols-[430px_minmax(0,1fr)] lg:items-start">
-          <aside className="surface min-w-0 overflow-hidden lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)]">
+        <div className="grid min-w-0 gap-5 xl:grid-cols-[430px_minmax(0,1fr)] xl:items-start">
+          <aside className="surface hidden min-w-0 overflow-hidden xl:sticky xl:top-6 xl:block xl:max-h-[calc(100vh-3rem)]">
             <div className="border-b border-odds-border px-4 py-4 sm:px-5">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between lg:flex-col 2xl:flex-row">
                 <div className="min-w-0">
@@ -803,7 +952,7 @@ function App() {
               </div>
             </div>
 
-            <div className="max-h-[calc(100vh-10rem)] min-w-0 overflow-y-auto p-4 sm:p-5 lg:max-h-[calc(100vh-10rem)]">
+            <div className="max-h-[calc(100vh-10rem)] min-w-0 overflow-y-auto p-4 sm:p-5 xl:max-h-[calc(100vh-10rem)]">
               {finishedMatches.length > 0 ? (
                 <div className="mb-4 flex flex-col gap-3 rounded-lg border border-odds-border bg-odds-control/35 p-3 sm:flex-row sm:items-center sm:justify-between lg:flex-col lg:items-stretch 2xl:flex-row 2xl:items-center">
                   <div className="flex min-w-0 items-center gap-2 text-sm text-odds-text2">
@@ -832,9 +981,7 @@ function App() {
               ) : null}
 
               {initialMatchesLoading && matches.length === 0 ? (
-                <section className="rounded-lg border border-odds-border bg-odds-control/35 p-5 text-sm text-odds-text2">
-                  正在加载比赛数据...
-                </section>
+                <LoadingState title="正在加载比赛数据..." />
               ) : hasVisibleMatches && hasRadarMatches ? (
                 <div className="grid min-w-0 gap-5">
                   {matchGroups.map((group) => (
@@ -848,17 +995,27 @@ function App() {
                       onPause={(id) => void handlePauseMonitorMatch(id)}
                       onResume={(id) => void handleResumeMonitorMatch(id)}
                       hidingMatchId={hidingMatchId}
+                      canManage={canManage}
                     />
                   ))}
                 </div>
               ) : hasVisibleMatches ? (
-                <section className="rounded-lg border border-odds-border bg-odds-control/35 p-5 text-sm leading-6 text-odds-text2">
-                  没有匹配当前搜索条件的比赛。
-                </section>
+                <EmptyState
+                  title="赛事雷达"
+                  reasonCode="api_zero_rows"
+                  reason="接口已有比赛数据，但当前搜索条件返回 0 条。"
+                  rowCount={0}
+                  suggestedAction="清空搜索关键词，或检查球队名称、时间和联赛字段。"
+                />
               ) : (
-                <section className="rounded-lg border border-odds-border bg-odds-control/35 p-5 text-sm leading-6 text-odds-text2">
-                  当前没有今天或明天的未完赛比赛。请确认后端 API 是否启动，并检查 SQLite 采集数据是否包含当前日期窗口。
-                </section>
+                <EmptyState
+                  title="赛事雷达"
+                  reasonCode={healthError ? 'api_not_called' : 'database_no_records'}
+                  reason="当前没有今天或明天的未完赛比赛。"
+                  rowCount={0}
+                  suggestedAction="确认后端 API 是否启动，并检查 SQLite 采集数据是否包含当前日期窗口。"
+                  tone={healthError ? 'danger' : 'warning'}
+                />
               )}
             </div>
           </aside>
@@ -888,17 +1045,33 @@ function App() {
               </div>
               <ActionBar
                 loadingAction={loadingAction}
+                canManage={canManage}
                 onExportCsv={handleExportCsv}
                 onExportChart={handleExportChart}
                 onViewRawData={handleViewRawData}
-                onAddMatch={() => setAddModalOpen(true)}
+                onAddMatch={handleOpenAddMatch}
                 embedded
                 title="快捷操作"
                 description="导出、回看和扩展监控对象"
               />
               <div className="p-4 sm:p-5">{detailTabContent}</div>
             </section>
-          ) : null}
+          ) : (
+            <section className="surface min-w-0 p-4 sm:p-5">
+              {initialMatchesLoading ? (
+                <LoadingState title="正在加载比赛数据..." />
+              ) : (
+                <EmptyState
+                  title="单场详情"
+                  reasonCode={healthError ? 'api_not_called' : 'database_no_records'}
+                  reason="当前没有可选比赛，因此不会调用单场详情、情报、赔率和诊断接口。"
+                  rowCount={0}
+                  suggestedAction="确认后端 API、SQLite 数据和当前日期窗口是否有可监控比赛。"
+                  tone={healthError ? 'danger' : 'warning'}
+                />
+              )}
+            </section>
+          )}
         </div>
       </div>
 
@@ -910,7 +1083,27 @@ function App() {
         onCustomBackgroundChange={setCustomBackground}
         onClose={() => setThemePanelOpen(false)}
       />
-      <RawDataModal open={rawModalOpen} rows={rawRows} loading={rawLoading} onClose={() => setRawModalOpen(false)} />
+      <ConfirmActionDialog
+        open={Boolean(pauseConfirmMatch)}
+        title="暂停采集"
+        message={
+          pauseConfirmMatch
+            ? `确认暂停采集「${pauseConfirmMatch.name}」吗？看板会保留历史数据，但后续采集会跳过该比赛。`
+            : ''
+        }
+        confirmLabel="暂停采集"
+        loading={Boolean(pauseConfirmMatchId && hidingMatchId === pauseConfirmMatchId)}
+        onConfirm={() => void confirmPauseMonitorMatch()}
+        onCancel={() => setPauseConfirmMatchId(null)}
+      />
+      <AdminLoginModal
+        open={loginModalOpen}
+        onClose={() => {
+          setLoginModalOpen(false);
+          setOpenAddAfterLogin(false);
+        }}
+        onSuccess={handleLoginSuccess}
+      />
       <AddMatchModal
         open={addModalOpen}
         loading={addingMatch}

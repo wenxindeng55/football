@@ -11,6 +11,7 @@ interface MatchDateGroupProps {
   onHide: (id: string) => void;
   onPause: (id: string) => void;
   onResume: (id: string) => void;
+  canManage: boolean;
 }
 
 export function MatchDateGroup({
@@ -22,6 +23,7 @@ export function MatchDateGroup({
   onHide,
   onPause,
   onResume,
+  canManage,
 }: MatchDateGroupProps) {
   return (
     <section className="min-w-0">
@@ -47,6 +49,7 @@ export function MatchDateGroup({
             onPause={onPause}
             onResume={onResume}
             hiding={hidingMatchId === match.id}
+            canManage={canManage}
           />
         ))}
       </div>

@@ -52,7 +52,8 @@ export interface AlertItem {
   message: string;
   riskLevel?: AlertLevel;
   confidence?: '高' | '中' | '低' | string;
-  marketWeight?: '核心' | '中等' | '低流动性' | string;
+  marketWeight?: '核心盘口' | '中等盘口' | '低权重盘口' | string;
+  marketWeightRank?: number | string;
   triggerReason?: string;
   confirmationNeeded?: string;
 }

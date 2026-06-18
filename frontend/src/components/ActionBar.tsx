@@ -4,6 +4,7 @@ type ActionKey = 'csv' | 'chart' | 'raw' | 'add';
 
 interface ActionBarProps {
   loadingAction: ActionKey | null;
+  canManage: boolean;
   onExportCsv: () => void;
   onExportChart: () => void;
   onViewRawData: () => void;
@@ -28,6 +29,7 @@ const actions: Array<{
 
 export function ActionBar({
   loadingAction,
+  canManage,
   onExportCsv,
   onExportChart,
   onViewRawData,
@@ -56,12 +58,14 @@ export function ActionBar({
         {actions.map((action) => {
           const Icon = action.icon;
           const loading = loadingAction === action.key;
+          const disabled = loadingAction !== null || (!canManage && action.key !== 'add');
           return (
             <button
               key={action.label}
               type="button"
               onClick={handlers[action.key]}
-              disabled={loadingAction !== null}
+              disabled={disabled}
+              title={!canManage ? '管理员登录后可用' : undefined}
               className={`focus-ring inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold transition ${
                 action.primary
                   ? 'border-odds-success/50 bg-odds-success/15 text-odds-success hover:bg-odds-success/20'

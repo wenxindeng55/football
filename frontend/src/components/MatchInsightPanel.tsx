@@ -40,7 +40,12 @@ export function MatchInsightPanel({ data, loading = false }: MatchInsightPanelPr
       <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3">
         {data.items.map((item) => (
           <article key={item.id} className={`rounded-lg border p-3 ${severityClass(item.severity)}`}>
-            <p className="text-sm font-semibold">{item.title}</p>
+            <div className="flex items-start justify-between gap-3">
+              <p className="text-sm font-semibold">{item.title}</p>
+              <span className="shrink-0 rounded-md border border-current/25 px-2 py-0.5 text-xs">
+                可信度：{item.confidence || '待评估'}
+              </span>
+            </div>
             <p className="mt-2 text-sm leading-6 text-odds-text">{item.message}</p>
           </article>
         ))}

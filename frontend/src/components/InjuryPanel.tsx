@@ -31,7 +31,7 @@ export function InjuryPanel({ data }: InjuryPanelProps) {
         ))}
         {data.summary.total === 0 ? (
           <span className="rounded-md border border-odds-border bg-odds-control/55 px-2.5 py-1 text-xs text-odds-muted">
-            暂无记录
+            0 条伤停记录
           </span>
         ) : null}
       </div>

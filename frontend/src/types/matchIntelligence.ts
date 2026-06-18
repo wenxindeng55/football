@@ -210,6 +210,7 @@ export interface MatchInsightItem {
   title: string;
   message: string;
   severity: MatchInsightSeverity;
+  confidence?: '高' | '中' | '低' | string;
 }
 
 export interface OddsEventCorrelation {

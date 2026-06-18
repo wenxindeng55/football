@@ -1,5 +1,7 @@
 import type { AlertItem, MarketData, MarketKey, MatchData, SummaryCardData } from '../types/odds';
 
+export type RawMarketFilter = MarketKey | 'all';
+
 const DEFAULT_API_BASE_URL = '';
 
 function apiBaseUrl() {
@@ -13,7 +15,7 @@ function joinPath(path: string) {
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = init?.body ? { 'Content-Type': 'application/json', ...init.headers } : init?.headers;
-  const response = await fetch(joinPath(path), { ...init, headers });
+  const response = await fetch(joinPath(path), { credentials: 'include', ...init, headers });
   if (!response.ok) {
     throw new Error(`API 请求失败：${response.status} ${response.statusText}`);
   }
@@ -21,7 +23,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 async function requestBlob(path: string): Promise<{ blob: Blob; filename: string | null }> {
-  const response = await fetch(joinPath(path));
+  const response = await fetch(joinPath(path), { credentials: 'include' });
   if (!response.ok) {
     throw new Error(`API 请求失败：${response.status} ${response.statusText}`);
   }
@@ -78,6 +80,11 @@ export interface RawOddsRow {
 export interface RawOddsResponse {
   matchId: string;
   market: string;
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+  changedOnly: boolean;
   rows: RawOddsRow[];
 }
 
@@ -165,8 +172,19 @@ export function fetchAlerts(matchId: string) {
   return requestJson<AlertItem[]>(`/api/matches/${encodeURIComponent(matchId)}/alerts`);
 }
 
-export function fetchRawOdds(matchId: string, market: MarketKey) {
-  const search = new URLSearchParams({ market });
+export interface FetchRawOddsOptions {
+  market?: RawMarketFilter;
+  limit?: number;
+  offset?: number;
+  changedOnly?: boolean;
+}
+
+export function fetchRawOdds(matchId: string, options: FetchRawOddsOptions = {}) {
+  const search = new URLSearchParams();
+  if (options.market && options.market !== 'all') search.set('market', options.market);
+  search.set('limit', String(options.limit ?? 20));
+  search.set('offset', String(options.offset ?? 0));
+  if (options.changedOnly) search.set('changedOnly', 'true');
   return requestJson<RawOddsResponse>(`/api/matches/${encodeURIComponent(matchId)}/raw?${search}`);
 }
 

@@ -180,6 +180,52 @@ python sgodds_collector.py plot --match "Iran vs New Zealand" --market "01 | 1X2
 4. 在页面切换比赛卡片和盘口 Tab，确认图表、表格、摘要卡片和异动提醒正常展示。
 5. 停掉后端刷新前端，确认数据诊断展示 API 错误；只有设置 `VITE_ENABLE_MOCK_FALLBACK=true` 时才会展示开发种子数据。
 
+## 公网访问控制
+
+当前访问模型是“公开只读 + 管理员操作鉴权”：
+
+- 不登录也可以打开看板、查看比赛列表、比赛详情、盘口走势、摘要、赛前情报和数据诊断。
+- 以下操作必须先以管理员身份登录：添加监控比赛、隐藏比赛、暂停/恢复采集、发现候选比赛、查看原始数据、导出 CSV、导出图表。
+- 权限判断在 FastAPI 后端完成；前端禁用或隐藏按钮只是辅助展示。
+- 未登录访问受保护接口会返回 `401`，登录有效但没有管理员权限会返回 `403`。
+
+### 管理员环境变量
+
+程序启动时会自动读取项目根目录的 `.env` 文件；系统环境变量优先级更高，已经在 shell、服务管理器或容器里设置的变量不会被 `.env` 覆盖。本地可以直接在项目根目录创建 `.env`：
+
+```env
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=change-me
+AUTH_SECRET_KEY=replace-with-a-long-random-secret
+AUTH_COOKIE_SECURE=false
+AUTH_SESSION_TTL_SECONDS=43200
+```
+
+`.env` 已加入 `.gitignore`，不要把真实密码、哈希或密钥提交到仓库。
+
+生产环境可以继续用服务器环境变量，也可以由进程管理器加载 `.env`；如果使用 HTTPS，请设置 `AUTH_COOKIE_SECURE=true`。
+
+建议生产环境优先使用 `ADMIN_PASSWORD_HASH` 替代 `ADMIN_PASSWORD`。当前支持：
+
+- `pbkdf2_sha256$iterations$salt$hash`
+- `sha256:<hex>`
+
+可用以下命令生成 PBKDF2 哈希：
+
+```powershell
+python -c "from backend.auth import create_password_hash; import getpass; print(create_password_hash(getpass.getpass('Admin password: ')))"
+```
+
+如果前端和后端不同源部署，需要后端配置：
+
+```env
+CORS_ALLOW_ORIGINS=https://your-frontend.example.com
+AUTH_COOKIE_SAMESITE=none
+AUTH_COOKIE_SECURE=true
+```
+
+同源反向代理部署时，推荐让公网入口同时代理静态前端和 `/api`，前端继续使用相对路径 `/api`，不需要在浏览器端保存任何管理员密钥。
+
 ## 本地数据
 
 - SQLite：`data/sgodds_odds.sqlite3`

@@ -1,15 +1,33 @@
-import { Download, Globe2, Settings, Signal } from 'lucide-react';
+import { Download, Globe2, LockKeyhole, LogOut, Settings, Signal, UserCircle } from 'lucide-react';
+import { DataHealthSummary, type DataHealthItem } from './DataHealthSummary';
 
 interface HeaderProps {
   updatedAt: string;
   timezone: string;
+  healthItems: DataHealthItem[];
   exporting: boolean;
   exportDisabled?: boolean;
+  adminUsername?: string | null;
+  authChecking?: boolean;
   onExportCsv: () => void;
   onOpenSettings: () => void;
+  onLogin: () => void;
+  onLogout: () => void;
 }
 
-export function Header({ updatedAt, timezone, exporting, exportDisabled = false, onExportCsv, onOpenSettings }: HeaderProps) {
+export function Header({
+  updatedAt,
+  timezone,
+  healthItems,
+  exporting,
+  exportDisabled = false,
+  adminUsername = null,
+  authChecking = false,
+  onExportCsv,
+  onOpenSettings,
+  onLogin,
+  onLogout,
+}: HeaderProps) {
   return (
     <header className="surface sticky top-4 z-30 flex flex-col gap-4 bg-odds-panel/85 px-4 py-4 backdrop-blur-xl sm:px-5 lg:flex-row lg:items-center lg:justify-between">
       <div className="flex items-center gap-3">
@@ -23,21 +41,46 @@ export function Header({ updatedAt, timezone, exporting, exportDisabled = false,
       </div>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="flex flex-wrap items-center gap-2 text-xs text-odds-muted sm:text-sm">
-          <span className="inline-flex items-center gap-2 rounded-full border border-odds-border bg-odds-control/55 px-3 py-2 text-odds-text2">
-            <span className="h-2 w-2 rounded-full bg-odds-success shadow-[0_0_0_6px_rgba(34,211,166,0.12)]" />
-            <strong className="font-semibold text-odds-text">Live</strong>
-            10 分钟采集
-          </span>
-          <span className="rounded-full border border-odds-border bg-odds-control/55 px-3 py-2 numeric">
-            数据更新时间 {updatedAt}
-          </span>
-          <span className="inline-flex items-center gap-2 rounded-full border border-odds-border bg-odds-control/55 px-3 py-2">
-            <Globe2 className="h-4 w-4 text-odds-accent" />
-            新加坡时间 ({timezone})
-          </span>
+        <div className="flex min-w-0 flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-odds-muted sm:text-sm">
+            <span className="inline-flex items-center gap-2 rounded-full border border-odds-border bg-odds-control/55 px-3 py-2 text-odds-text2">
+              <span className="h-2 w-2 rounded-full bg-odds-success shadow-[0_0_0_6px_rgba(34,211,166,0.12)]" />
+              <strong className="font-semibold text-odds-text">Live</strong>
+              10 分钟采集
+            </span>
+            <span className="rounded-full border border-odds-border bg-odds-control/55 px-3 py-2 numeric">
+              数据更新时间 {updatedAt}
+            </span>
+            <span className="inline-flex items-center gap-2 rounded-full border border-odds-border bg-odds-control/55 px-3 py-2">
+              <Globe2 className="h-4 w-4 text-odds-accent" />
+              新加坡时间 ({timezone})
+            </span>
+          </div>
+          <DataHealthSummary items={healthItems} />
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          {adminUsername ? (
+            <button
+              type="button"
+              onClick={onLogout}
+              className="focus-ring inline-flex items-center gap-2 rounded-full border border-odds-success/35 bg-odds-success/10 px-3 py-2 text-sm text-odds-text hover:border-odds-success/60"
+              title="退出管理员登录"
+            >
+              <UserCircle className="h-4 w-4" />
+              <span className="max-w-[120px] truncate">{adminUsername}</span>
+              <LogOut className="h-4 w-4" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onLogin}
+              disabled={authChecking}
+              className="focus-ring inline-flex items-center gap-2 rounded-full border border-odds-border bg-odds-control/55 px-3 py-2 text-sm text-odds-text hover:border-odds-accent/50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <LockKeyhole className="h-4 w-4" />
+              {authChecking ? '检查登录...' : '管理员登录'}
+            </button>
+          )}
           <button
             type="button"
             onClick={onExportCsv}

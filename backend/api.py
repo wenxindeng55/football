@@ -16,6 +16,7 @@ from typing import Any
 import requests
 from fastapi import Body, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from logging_config import setup_logging
 from sgodds_collector import (
@@ -25,11 +26,28 @@ from sgodds_collector import (
     match_status_for_time,
     parse_current_odds_matches,
 )
+from backend.auth import (
+    ADMIN_ROLE,
+    SESSION_COOKIE_NAME,
+    auth_configured,
+    clear_login_failures,
+    configured_admin_username,
+    cookie_samesite,
+    cookie_secure,
+    create_session_token,
+    login_is_limited,
+    read_session_token,
+    record_login_failure,
+    session_ttl_seconds,
+    verify_admin_credentials,
+)
+from backend.env_loader import load_env_file
 from backend.services.insight_service import build_match_insights
 from team_translations import translate_match_name, translate_team
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+load_env_file(PROJECT_ROOT / ".env")
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.json"
 DEFAULT_DATABASE_PATH = PROJECT_ROOT / "data" / "sgodds_odds.sqlite3"
 logger = setup_logging("odds_watcher.backend", "backend.log")
@@ -58,23 +76,71 @@ MARKET_DEFINITIONS: dict[str, dict[str, Any]] = {
     },
 }
 
+DEFAULT_CORS_ORIGINS = [
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+    "http://127.0.0.1:5174",
+    "http://localhost:5174",
+    "http://127.0.0.1:5175",
+    "http://localhost:5175",
+    "http://127.0.0.1:4173",
+    "http://localhost:4173",
+]
+
+
+def cors_origins() -> list[str]:
+    configured = os.getenv("CORS_ALLOW_ORIGINS", "").strip()
+    if not configured:
+        return DEFAULT_CORS_ORIGINS
+    origins = [origin.strip() for origin in configured.split(",") if origin.strip()]
+    return origins or DEFAULT_CORS_ORIGINS
+
+
 app = FastAPI(title="Odds Watcher API", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://127.0.0.1:5173",
-        "http://localhost:5173",
-        "http://127.0.0.1:5174",
-        "http://localhost:5174",
-        "http://127.0.0.1:5175",
-        "http://localhost:5175",
-        "http://127.0.0.1:4173",
-        "http://localhost:4173",
-    ],
-    allow_credentials=False,
+    allow_origins=cors_origins(),
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def protected_api_path(method: str, path: str) -> bool:
+    if method.upper() == "OPTIONS" or not path.startswith("/api/"):
+        return False
+    if path in {"/api/health", "/api/auth/login", "/api/auth/logout", "/api/auth/session"}:
+        return False
+    if method.upper() != "GET":
+        return True
+    if path == "/api/discovery/matches":
+        return True
+    return path.endswith("/raw") or path.endswith("/export.csv") or path.endswith("/chart.png")
+
+
+def current_auth_session(request: Request) -> dict[str, Any] | None:
+    session = read_session_token(request.cookies.get(SESSION_COOKIE_NAME))
+    if not session:
+        return None
+    return {"username": session.username, "role": session.role, "expiresAt": session.expires_at}
+
+
+def auth_response(status_code: int, detail: str) -> JSONResponse:
+    return JSONResponse(status_code=status_code, content={"detail": detail})
+
+
+@app.middleware("http")
+async def require_admin_for_protected_api(request: Request, call_next: Any) -> Any:
+    if not protected_api_path(request.method, request.url.path):
+        return await call_next(request)
+
+    session = read_session_token(request.cookies.get(SESSION_COOKIE_NAME))
+    if not session:
+        return auth_response(401, "需要管理员登录")
+    if session.role != ADMIN_ROLE:
+        return auth_response(403, "当前账号无权执行该操作")
+    request.state.auth_session = session
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -652,6 +718,10 @@ def query_snapshot_rows(
     connection: sqlite3.Connection,
     meta: dict[str, Any],
     market_key: str | None,
+    *,
+    changed_only: bool = False,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[sqlite3.Row]:
     params: list[Any] = [snapshot_match_name(meta), meta["url"]]
     market_filter = ""
@@ -661,6 +731,12 @@ def query_snapshot_rows(
             return []
         market_filter = "AND market_type = ?"
         params.append(actual_market_type)
+
+    changed_filter = "AND ABS(change_percent) > 0.0001" if changed_only else ""
+    paging_clause = ""
+    if limit is not None:
+        paging_clause = "LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
 
     return connection.execute(
         f"""
@@ -680,10 +756,43 @@ def query_snapshot_rows(
         WHERE match_name = ?
           AND match_url = ?
           {market_filter}
+          {changed_filter}
         ORDER BY collected_at DESC, market_type, option_name, id
+        {paging_clause}
         """,
         params,
     ).fetchall()
+
+
+def query_snapshot_row_count(
+    connection: sqlite3.Connection,
+    meta: dict[str, Any],
+    market_key: str | None,
+    *,
+    changed_only: bool = False,
+) -> int:
+    params: list[Any] = [snapshot_match_name(meta), meta["url"]]
+    market_filter = ""
+    if market_key:
+        actual_market_type = resolve_actual_market_type(connection, meta, market_key)
+        if not actual_market_type:
+            return 0
+        market_filter = "AND market_type = ?"
+        params.append(actual_market_type)
+
+    changed_filter = "AND ABS(change_percent) > 0.0001" if changed_only else ""
+    row = connection.execute(
+        f"""
+        SELECT COUNT(*) AS count
+        FROM odds_snapshots
+        WHERE match_name = ?
+          AND match_url = ?
+          {market_filter}
+          {changed_filter}
+        """,
+        params,
+    ).fetchone()
+    return int(row["count"] or 0) if row else 0
 
 
 def snapshot_rows_to_dicts(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
@@ -897,14 +1006,14 @@ def market_weight(market_type: str, option_name: str) -> dict[str, str | int]:
     market_text = f"{market_type} {option_name}".lower()
     market_key = market_key_for_type(market_type)
     if "any other" in market_text or "correct score" in market_text or "pick the score" in market_text:
-        return {"label": "低流动性", "rank": 1, "confidence": "低"}
+        return {"label": "低权重盘口", "rank": 1, "confidence": "低"}
     if re.search(r"\b(?:7|8|9\+?|10\+?)\b", market_text) and "total goal" in market_text:
-        return {"label": "低流动性", "rank": 1, "confidence": "低"}
+        return {"label": "低权重盘口", "rank": 1, "confidence": "低"}
     if market_key in {"1x2", "asian", "totals"}:
-        return {"label": "核心", "rank": 3, "confidence": "高"}
+        return {"label": "核心盘口", "rank": 3, "confidence": "高"}
     if market_key == "btts" or "halftime" in market_text or "half-time" in market_text or "total goal" in market_text:
-        return {"label": "中等", "rank": 2, "confidence": "中"}
-    return {"label": "低流动性", "rank": 1, "confidence": "低"}
+        return {"label": "中等盘口", "rank": 2, "confidence": "中"}
+    return {"label": "低权重盘口", "rank": 1, "confidence": "低"}
 
 
 def alert_level(change_percent: float, weight_rank: int = 3) -> str:
@@ -924,26 +1033,40 @@ def risk_payload(row: sqlite3.Row) -> dict[str, str]:
     level = alert_level(change_percent, int(weight["rank"]))
     confirmation = (
         "需要确认胜平负、亚洲让球或大小球是否同步变化。"
-        if weight["label"] == "低流动性"
+        if weight["label"] == "低权重盘口"
         else "继续观察相邻时间点是否延续同方向变化。"
     )
     return {
         "riskLevel": level,
         "confidence": str(weight["confidence"]),
         "marketWeight": str(weight["label"]),
+        "marketWeightRank": str(weight["rank"]),
         "triggerReason": f"{row['market_type']} {row['option_name']} 变化 {change_percent:+.1f}%",
         "confirmationNeeded": confirmation,
     }
 
 
 def build_alerts(connection: sqlite3.Connection, meta: dict[str, Any]) -> list[dict[str, Any]]:
-    rows = [
+    candidates = [
         row
         for row in latest_rows(connection, meta)
         if abs(float(row["change_percent"])) >= 5
-    ][:8]
+    ]
+
+    level_rank = {"高风险": 3, "重要": 2, "普通": 1}
+    ranked_rows = sorted(
+        candidates,
+        key=lambda row: (
+            int(market_weight(row["market_type"], row["option_name"])["rank"]),
+            level_rank.get(alert_level(float(row["change_percent"]), int(market_weight(row["market_type"], row["option_name"])["rank"])), 0),
+            abs(float(row["change_percent"])),
+            str(row["collected_at"]),
+        ),
+        reverse=True,
+    )[:8]
+
     alerts: list[dict[str, Any]] = []
-    for row in rows:
+    for row in ranked_rows:
         change_percent = float(row["change_percent"])
         option = row["option_name"]
         risk = risk_payload(row)
@@ -958,8 +1081,6 @@ def build_alerts(connection: sqlite3.Connection, meta: dict[str, Any]) -> list[d
                 "message": (
                     f"{row['market_type']} {localize_match_text(meta, option)} 从 {float(row['opening_odds']):.2f} "
                     f"到 {float(row['current_odds']):.2f}，变化 {change_percent:+.1f}%。"
-                    f" 市场权重：{risk['marketWeight']}；置信度：{risk['confidence']}；"
-                    f"需要确认：{risk['confirmationNeeded']}"
                 ),
                 **risk,
             }
@@ -2219,6 +2340,55 @@ def build_data_diagnostics(connection: sqlite3.Connection, meta: dict[str, Any])
     }
 
 
+@app.get("/api/auth/session")
+def auth_session(request: Request) -> dict[str, Any]:
+    session = current_auth_session(request)
+    if not session or session.get("role") != ADMIN_ROLE:
+        return {"authenticated": False, "user": None}
+    return {"authenticated": True, "user": session}
+
+
+@app.post("/api/auth/login")
+def auth_login(request: Request, response: Response, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    if not auth_configured():
+        raise HTTPException(status_code=503, detail="管理员登录未配置")
+
+    username = str(payload.get("username", "")).strip()
+    password = str(payload.get("password", ""))
+    client_ip = request.client.host if request.client else "-"
+    if login_is_limited(client_ip, username):
+        raise HTTPException(status_code=429, detail="登录失败次数过多，请稍后再试")
+
+    if not username or not password or not verify_admin_credentials(username, password):
+        record_login_failure(client_ip, username)
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+    clear_login_failures(client_ip, username)
+    admin_username = configured_admin_username()
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=create_session_token(admin_username),
+        max_age=session_ttl_seconds(),
+        httponly=True,
+        secure=cookie_secure(),
+        samesite=cookie_samesite(),
+        path="/",
+    )
+    return {
+        "authenticated": True,
+        "user": {
+            "username": admin_username,
+            "role": ADMIN_ROLE,
+        },
+    }
+
+
+@app.post("/api/auth/logout")
+def auth_logout(response: Response) -> dict[str, Any]:
+    response.delete_cookie(key=SESSION_COOKIE_NAME, path="/", samesite=cookie_samesite(), secure=cookie_secure())
+    return {"authenticated": False, "user": None}
+
+
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     path = database_path()
@@ -2520,6 +2690,9 @@ def match_data_diagnostics(match_id: str) -> dict[str, Any]:
 def match_raw_rows(
     match_id: str,
     market: str | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    changed_only: bool = Query(default=False, alias="changedOnly"),
 ) -> dict[str, Any]:
     meta = find_match_meta(match_id)
     if not meta:
@@ -2528,7 +2701,15 @@ def match_raw_rows(
     market_key = normalize_market_key(market) if market else None
     try:
         with connect_readonly() as connection:
-            rows = query_snapshot_rows(connection, meta, market_key)
+            total = query_snapshot_row_count(connection, meta, market_key, changed_only=changed_only)
+            rows = query_snapshot_rows(
+                connection,
+                meta,
+                market_key,
+                changed_only=changed_only,
+                limit=limit,
+                offset=offset,
+            )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"database not found: {exc}") from exc
     except sqlite3.Error as exc:
@@ -2537,6 +2718,11 @@ def match_raw_rows(
     return {
         "matchId": meta["id"],
         "market": market_key or "all",
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "hasMore": offset + len(rows) < total,
+        "changedOnly": changed_only,
         "rows": snapshot_rows_to_dicts(rows),
     }
 
